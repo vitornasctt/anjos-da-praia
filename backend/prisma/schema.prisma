@@ -1,0 +1,175 @@
+// Anjos da Praia - modelo de dados
+// PostgreSQL (Supabase). A modelagem e identica a usada durante o MVP
+// local em SQLite - so o provider e a URL de conexao mudaram.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// SQLite nao suporta enum nativo no Prisma: os valores abaixo sao
+// validados na camada de aplicacao (ver src/constants/enums.ts).
+// Role: ADMIN | ATENDENTE | EQUIPE_CAMPO
+// WristbandStatus: DISPONIVEL | ATIVA | ENCERRADA
+// IncidentStatus: CRIANCA_LOCALIZADA | EQUIPE_A_CAMINHO |
+//   CRIANCA_RECEBIDA_PELA_EQUIPE | RESPONSAVEIS_LOCALIZADOS |
+//   REENCONTRO_REALIZADO | CANCELADA
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  registeredFamilies  Family[]         @relation("FamilyRegisteredBy")
+  statusChanges       IncidentStatusHistory[]
+  assignedIncidents   Incident[]       @relation("IncidentAssignedTeamMember")
+  auditLogs           AuditLog[]
+
+  @@map("users")
+}
+
+model Beach {
+  id        String   @id @default(cuid())
+  name      String
+  city      String
+  createdAt DateTime @default(now())
+
+  tents     Tent[]
+  incidents Incident[]
+
+  @@map("beaches")
+}
+
+model Tent {
+  id        String   @id @default(cuid())
+  beachId   String
+  name      String
+  latitude  Float
+  longitude Float
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  beach     Beach    @relation(fields: [beachId], references: [id])
+
+  @@index([beachId])
+  @@map("tents")
+}
+
+model Family {
+  id               String   @id @default(cuid())
+  responsibleName  String
+  responsiblePhone String
+  registeredById   String?
+  createdAt        DateTime @default(now())
+
+  registeredBy User?      @relation("FamilyRegisteredBy", fields: [registeredById], references: [id])
+  children     Child[]
+
+  @@map("families")
+}
+
+model Child {
+  id                       String  @id @default(cuid())
+  familyId                 String
+  firstName                String
+  optionalIdentificationNote String?
+  photoUrl                 String?
+  createdAt                DateTime @default(now())
+
+  family     Family      @relation(fields: [familyId], references: [id])
+  wristbands Wristband[]
+
+  @@index([familyId])
+  @@map("children")
+}
+
+model Wristband {
+  id               String           @id @default(cuid())
+  publicIdentifier String           @unique @default(cuid())
+  printedNumber    String           @unique
+  childId          String?
+  status           String           @default("DISPONIVEL")
+  createdAt        DateTime         @default(now())
+
+  child     Child?     @relation(fields: [childId], references: [id])
+  incidents Incident[]
+
+  @@index([printedNumber])
+  @@index([publicIdentifier])
+  @@map("wristbands")
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  incidents Incident[]
+
+  @@map("teams")
+}
+
+model Incident {
+  id                String         @id @default(cuid())
+  wristbandId       String
+  latitude          Float?
+  longitude         Float?
+  locationAccuracy  Float?
+  beachId           String?
+  referencePoint    String?
+  status            String         @default("CRIANCA_LOCALIZADA")
+  assignedTeamId    String?
+  assignedById       String?
+  createdAt         DateTime       @default(now())
+  resolvedAt        DateTime?
+
+  wristband     Wristband @relation(fields: [wristbandId], references: [id])
+  beach         Beach?    @relation(fields: [beachId], references: [id])
+  assignedTeam  Team?     @relation(fields: [assignedTeamId], references: [id])
+  assignedBy    User?     @relation("IncidentAssignedTeamMember", fields: [assignedById], references: [id])
+  statusHistory IncidentStatusHistory[]
+
+  @@index([wristbandId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("incidents")
+}
+
+model IncidentStatusHistory {
+  id             String   @id @default(cuid())
+  incidentId     String
+  previousStatus String?
+  newStatus      String
+  changedById    String?
+  changedAt      DateTime        @default(now())
+
+  incident  Incident @relation(fields: [incidentId], references: [id])
+  changedBy User?    @relation(fields: [changedById], references: [id])
+
+  @@index([incidentId])
+  @@map("incident_status_history")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String
+  entityId   String
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
