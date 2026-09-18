@@ -1,4 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { Tent as TentIcon, Search, X } from "lucide-react";
 import { apiRequest, ApiError } from "../../services/api";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
@@ -6,6 +9,31 @@ import { SkeletonRows } from "../../components/Skeleton";
 import { Beach, Tent, Team } from "../../types";
 
 type DeleteTarget = { kind: "beach"; item: Beach } | { kind: "tent"; item: Tent };
+
+// Mesmo centro padrao do Mapa (sede da operacao em Guarapari/ES) - so o
+// ponto inicial de exibicao, o clique no mapa funciona em qualquer lugar.
+const DEFAULT_CENTER: [number, number] = [-20.6568561, -40.5039761];
+
+// Pin vermelho estilo Google Maps. O icone padrao do Leaflet depende de
+// imagens que o bundler nao resolve (aparece quebrado), entao desenhamos
+// o pin em SVG, ancorado pela ponta para marcar o ponto exato do clique.
+const pinIcon = L.divIcon({
+  className: "",
+  html: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="42" viewBox="0 0 24 32" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,0.4))"><path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 20 12 20s12-11 12-20C24 5.4 18.6 0 12 0z" fill="#ea4335" stroke="#b31412" stroke-width="1"/><circle cx="12" cy="12" r="4.5" fill="#fff"/></svg>`,
+  iconSize: [32, 42],
+  iconAnchor: [16, 42],
+});
+
+// Componente sem render proprio: so escuta cliques no mapa (padrao do
+// react-leaflet para eventos) e repassa a coordenada pro formulario.
+function LocationPicker({ onPick }: { onPick: (lat: number, lng: number) => void }) {
+  useMapEvents({
+    click(e) {
+      onPick(e.latlng.lat, e.latlng.lng);
+    },
+  });
+  return null;
+}
 
 export function TentsBeachesPage() {
   const [teams, setTeams] = useState<Team[]>([]);
@@ -242,6 +270,23 @@ export function TentsBeachesPage() {
               required
               className="w-full rounded-lg border border-ocean-200 px-3 py-2"
             />
+            <div>
+              <p className="mb-1 text-sm text-ocean-600">Clique no mapa para marcar o local da tenda</p>
+              <div className="h-56 overflow-hidden rounded-lg border border-ocean-200">
+                <MapContainer center={DEFAULT_CENTER} zoom={13} style={{ height: "100%", width: "100%" }}>
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+                  <LocationPicker
+                    onPick={(lat, lng) => setTentForm((f) => ({ ...f, latitude: lat.toFixed(6), longitude: lng.toFixed(6) }))}
+                  />
+                  {tentForm.latitude && tentForm.longitude && !Number.isNaN(Number(tentForm.latitude)) && !Number.isNaN(Number(tentForm.longitude)) && (
+                    <Marker position={[Number(tentForm.latitude), Number(tentForm.longitude)]} icon={pinIcon} />
+                  )}
+                </MapContainer>
+              </div>
+            </div>
             <div className="flex gap-2">
               <label htmlFor="tentLatitude" className="sr-only">Latitude</label>
               <input

@@ -192,14 +192,14 @@ Base: `/api`
 | GET | `/public/beaches` | público | Lista de praias (fallback sem geolocalização) |
 | POST | `/public/incidents` | público (rate limited) | Cria a ocorrência a partir do QR Code |
 | POST | `/families/intake` | ADMIN, ATENDENTE | Cadastro rápido família + criança + pulseira |
-| GET | `/families`, `/families/:id` | ADMIN, ATENDENTE | Listagem/detalhe |
+| GET | `/families`, `/families/:id` | ADMIN, ATENDENTE | Listagem paginada por cursor (`cursor`, `limit`, `search`) / detalhe |
 | GET | `/wristbands/search?printedNumber=` | ADMIN, ATENDENTE | Busca pulseira |
-| GET | `/incidents` | autenticado | Lista ocorrências |
+| GET | `/incidents` | autenticado | Lista paginada por cursor (`cursor`, `limit`, `filter`, `search` por pulseira, `includeHistory`); `open=true` devolve só as em andamento (usado pelo mapa) |
 | GET | `/incidents/summary` | autenticado | Cards do painel |
-| GET | `/incidents/:id` | autenticado | Detalhe com dados do responsável |
+| GET | `/incidents/:id` | autenticado | Detalhe com dados do responsável; sem GPS, traz `beachTent` (tenda da praia) para abrir o mapa no ponto aproximado |
 | PATCH | `/incidents/:id/status` | autenticado | Avança/cancela status (máquina de estados validada) |
 | GET/POST | `/teams`, `/tents`, `/beaches` | autenticado / ADMIN | Cadastros de apoio |
-| GET/POST/PATCH | `/users` | ADMIN | Gestão de usuários |
+| GET/POST/PATCH | `/users` | ADMIN | Gestão de usuários (listagem paginada por cursor, com busca) |
 | GET | `/reports/overview` | ADMIN | Estatísticas (por praia, tenda mais próxima, horário) |
 | POST | `/reports/data-retention/run` | ADMIN | Executa a rotina de anonimização (LGPD) sob demanda |
 
@@ -281,6 +281,7 @@ O seed também cria a praia "Praia de Camburi", uma tenda, uma equipe ("Equipe A
 ## Segurança
 
 - Senhas com hash bcrypt (nunca texto puro)
+- Sessão em **cookie estritamente necessário**: `HttpOnly`, `Secure` em produção, `SameSite=Lax`, validade de 8h (igual à do JWT), contendo apenas o ID do usuário (nenhum dado de criança/responsável). Respostas de `/auth/*` usam `Cache-Control: no-store`, e o logout expira os cookies. Não há cookies de analytics/marketing, então não há banner de consentimento
 - Autenticação JWT em **cookie httpOnly** (inacessível via JavaScript, reduz o risco de roubo de sessão por XSS) + autorização por perfil validada em **todas** as rotas sensíveis no backend (nunca apenas escondendo botão na UI)
 - Proteção **CSRF** (padrão double-submit cookie): toda requisição que altera estado com sessão via cookie exige o header `X-CSRF-Token` correspondente ao cookie `csrfToken`
 - Validação e sanitização de entrada com Zod em todas as rotas que recebem dados do cliente
@@ -310,9 +311,10 @@ Pendências conhecidas para produção (fora do escopo do MVP do hackathon): rot
 
 - O tempo real cobre a criação e a mudança de status de ocorrências (WebSocket); o painel também mantém um polling de 20s como rede de segurança caso a conexão caia.
 - PWA cobre o casco da aplicação (HTML/JS/CSS) para abrir mesmo com conexão instável; as chamadas que dependem de dado ao vivo (checar pulseira, enviar alerta) continuam exigindo rede — não há fila de envio offline.
-- Testes de regressão em `backend/tests/regression.test.cjs`, executados com `npm test`. Usam um adaptador simulado e não instanciam um cliente de banco real. Cobrem autenticação, permissões, CSRF, validação, histórico, reenvio, retenção e tratamento de conflitos. A concorrência efetiva do PostgreSQL e o ambiente publicado ainda precisam de validação de integração.
+- Testes de regressão em `backend/tests/regression.test.cjs`, executados com `npm test`. Usam um adaptador simulado e não instanciam um cliente de banco real. Cobrem autenticação (cookies de login/logout), permissões, CSRF, validação, paginação por cursor, busca, histórico, reenvio, retenção e tratamento de conflitos. A concorrência efetiva do PostgreSQL e o ambiente publicado ainda precisam de validação de integração.
 - A auditoria atual de dependências não foi executada nesta revisão; os pacotes e suas versões foram preservados.
-- Há configuração de publicação para Vercel, mas esta revisão não publicou nem alterou banco ou credenciais. O rate limit usa memória por instância; limites globais em produção exigem armazenamento compartilhado. Listagens e relatórios ainda precisam de paginação/agregação para volumes elevados.
+- O rate limit usa memória por instância; limites globais em produção exigem armazenamento compartilhado. Ocorrências, usuários e famílias usam paginação por cursor; o relatório agrega no servidor com teto de segurança de 50 mil ocorrências, e listas de apoio (praias/tendas/equipes) têm teto de 300 itens.
+- Sem GPS (fluxo alternativo por praia), a localização exibida à equipe é aproximada: o link do mapa aponta para a tenda de apoio da praia informada, não para a posição real da criança.
 
 ## Melhorias futuras
 
@@ -329,7 +331,8 @@ Pendências conhecidas para produção (fora do escopo do MVP do hackathon): rot
 - Configure as variáveis do backend na hospedagem, incluindo `NODE_ENV=production`, `CORS_ORIGIN`, URLs do banco, `JWT_SECRET` e `CRON_SECRET`. Não use o seed de demonstração no banco real.
 - O seed de produção cria somente um administrador; praias, tendas e equipes são cadastradas pela interface. Ele não redefine uma conta já existente.
 - Horas dos relatórios, início do dia e agendamento local seguem Brasília. O agendamento Vercel está expresso em UTC.
-- Não foi encontrado repositório Git nesta pasta. O histórico anterior do Claude não foi recriado; os arquivos e a arquitetura existentes foram preservados.
+- Repositório: https://github.com/vitornasctt/anjos-da-praia (branch `master`).
+- Publicação atual (Vercel, dois projetos): frontend em https://anjos-da-praia.vercel.app (página pública em `/encontrei`) e API em `anjos-da-praia-api`. Cada projeto é publicado com `npx vercel --prod` a partir da sua pasta (`frontend/` ou `backend/`).
 
 ## Verificação local
 

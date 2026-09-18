@@ -25,8 +25,23 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-const COOKIE_MAX_AGE_MS = 8 * 60 * 60 * 1000; // alinhado ao JWT_EXPIRES_IN padrao (8h)
-const isProduction = env.nodeEnv === "production";
+// Mesmos atributos na criacao e na remocao do cookie: o navegador so apaga um
+// cookie se path/secure/sameSite baterem com os de quando ele foi criado.
+function cookieOptions(httpOnly: boolean, maxAgeMs?: number) {
+  return {
+    httpOnly,
+    secure: env.nodeEnv === "production",
+    sameSite: "lax" as const,
+    path: "/",
+    ...(maxAgeMs !== undefined ? { maxAge: maxAgeMs } : {}),
+  };
+}
+
+// Respostas de autenticacao nunca podem ser guardadas por cache/proxy.
+router.use((_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+});
 
 router.post("/login", loginLimiter, validateBody(loginSchema), asyncHandler(async (req, res) => {
   const { email, password } = req.body;
@@ -42,29 +57,26 @@ router.post("/login", loginLimiter, validateBody(loginSchema), asyncHandler(asyn
     return res.status(401).json({ error: "E-mail ou senha invalidos." });
   }
 
+  // So o ID no token: perfil e nome sao lidos do banco a cada requisicao
+  // (ver sessionUser), entao nada pessoal precisa viajar no cookie.
   const token = jwt.sign(
-    { sub: user.id, role: user.role, name: user.name },
+    { sub: user.id },
     env.jwtSecret,
     { expiresIn: env.jwtExpiresIn } as jwt.SignOptions
   );
   const csrfToken = crypto.randomBytes(24).toString("hex");
 
+  // A validade do cookie vem do proprio JWT (exp), entao os dois nunca
+  // divergem quando JWT_EXPIRES_IN muda.
+  const exp = (jwt.decode(token) as jwt.JwtPayload).exp!;
+  const maxAgeMs = exp * 1000 - Date.now();
+
   // Token de sessao em cookie httpOnly: inacessivel via JS, reduz o risco
   // de roubo por XSS. csrfToken fica legivel de proposito (double-submit
   // cookie pattern) - o front envia de volta no header X-CSRF-Token.
   res
-    .cookie("token", token, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: "lax",
-      maxAge: COOKIE_MAX_AGE_MS,
-    })
-    .cookie("csrfToken", csrfToken, {
-      httpOnly: false,
-      secure: isProduction,
-      sameSite: "lax",
-      maxAge: COOKIE_MAX_AGE_MS,
-    })
+    .cookie("token", token, cookieOptions(true, maxAgeMs))
+    .cookie("csrfToken", csrfToken, cookieOptions(false, maxAgeMs))
     .json({
       user: { id: user.id, name: user.name, email: user.email, role: user.role },
     });
@@ -72,7 +84,7 @@ router.post("/login", loginLimiter, validateBody(loginSchema), asyncHandler(asyn
 
 router.post("/logout", (req, res) => {
   // Clearing cookies must also work after expiration or account deactivation.
-  res.clearCookie("token").clearCookie("csrfToken").json({ ok: true });
+  res.clearCookie("token", cookieOptions(true)).clearCookie("csrfToken", cookieOptions(false)).json({ ok: true });
 });
 
 router.get("/me", authenticate, asyncHandler(async (req, res) => {

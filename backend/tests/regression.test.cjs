@@ -104,6 +104,59 @@ test('ocorrencia com GPS proprio nao busca tenda da praia como aproximacao (ja t
   assert.equal(result.status, 200);
   assert.equal(result.body.beachTent, null);
 });
+async function rawLogin() {
+  const bcrypt = require('bcryptjs');
+  const passwordHash = await bcrypt.hash('senha-correta', 4);
+  mock.method(prisma.user, 'findUnique', async () => ({ id: 'operator', name: 'Operador', email: 'op@example.test', role: 'ADMIN', active: true, passwordHash }));
+  return fetch(base + '/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'op@example.test', password: 'senha-correta' }),
+  });
+}
+test('login grava cookie de sessao HttpOnly com validade, sem dados pessoais e sem cache', async () => {
+  const { env } = require('../src/config/env.ts');
+  const previous = env.nodeEnv;
+  env.nodeEnv = 'production';
+  try {
+    const response = await rawLogin();
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    const cookies = response.headers.getSetCookie();
+    const session = cookies.find((c) => c.startsWith('token='));
+    const csrf = cookies.find((c) => c.startsWith('csrfToken='));
+    assert.match(session, /HttpOnly/i);
+    assert.match(session, /Secure/i);
+    assert.match(session, /SameSite=Lax/i);
+    assert.match(session, /Path=\//);
+    const maxAge = Number(/Max-Age=(\d+)/i.exec(session)[1]);
+    assert.ok(maxAge > 8 * 3600 - 60 && maxAge <= 8 * 3600, 'validade do cookie alinhada ao JWT (8h)');
+    assert.doesNotMatch(csrf, /HttpOnly/i);
+    assert.match(csrf, /Secure/i);
+    const payload = jwt.verify(/token=([^;]+)/.exec(session)[1], process.env.JWT_SECRET);
+    assert.deepEqual(Object.keys(payload).sort(), ['exp', 'iat', 'sub']);
+  } finally { env.nodeEnv = previous; }
+});
+test('logout expira os dois cookies com os mesmos atributos da criacao', async () => {
+  const { env } = require('../src/config/env.ts');
+  const previous = env.nodeEnv;
+  env.nodeEnv = 'production';
+  try {
+    const response = await fetch(base + '/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    const cookies = response.headers.getSetCookie();
+    for (const name of ['token', 'csrfToken']) {
+      const cookie = cookies.find((c) => c.startsWith(name + '='));
+      assert.match(cookie, /^[a-zA-Z]+=;/);
+      assert.match(cookie, /Expires=Thu, 01 Jan 1970/);
+      assert.match(cookie, /Path=\//);
+      assert.match(cookie, /Secure/i);
+      assert.match(cookie, /SameSite=Lax/i);
+    }
+    assert.match(cookies.find((c) => c.startsWith('token=')), /HttpOnly/i);
+  } finally { env.nodeEnv = previous; }
+});
 test('PATCH rejeita string false e ausencia do campo active', async () => {
   for (const resource of ['users', 'teams', 'tents']) {
     for (const body of [{ active: 'false' }, {}]) {
