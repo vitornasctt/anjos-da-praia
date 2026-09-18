@@ -5,8 +5,9 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Map as MapIcon } from "lucide-react";
 import { apiRequest } from "../services/api";
-import { Incident, Tent } from "../types";
+import { Incident, Page, Tent } from "../types";
 import { STATUS_META } from "../components/StatusBadge";
+import { Spinner } from "../components/Spinner";
 
 // Mapa exclusivo para usuarios autorizados (item 12). Nunca exposto
 // publicamente - a localizacao da crianca so aparece aqui.
@@ -40,6 +41,7 @@ const COLOR_MAP: Record<string, string> = {
 export function MapPage() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [tents, setTents] = useState<Tent[]>([]);
+  const [firstLoad, setFirstLoad] = useState(true);
 
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -49,10 +51,13 @@ export function MapPage() {
       if (loading) return;
       loading = true;
       try {
-        const [items, support] = await Promise.all([apiRequest<Incident[]>("/incidents"), apiRequest<Tent[]>("/tents")]);
-        if (!cancelled) { setIncidents(items); setTents(support.filter((tent) => tent.active)); setError(null); }
+        // O mapa so precisa das ocorrencias em andamento agora - filtrar no
+        // servidor (open=true) evita trazer meses de historico finalizado
+        // so pra descartar tudo no cliente logo em seguida.
+        const [page, support] = await Promise.all([apiRequest<Page<Incident>>("/incidents?open=true"), apiRequest<Tent[]>("/tents")]);
+        if (!cancelled) { setIncidents(page.items); setTents(support.filter((tent) => tent.active)); setError(null); }
       } catch { if (!cancelled) setError("Não foi possível atualizar o mapa. Tentaremos novamente em instantes."); }
-      finally { loading = false; }
+      finally { loading = false; if (!cancelled) setFirstLoad(false); }
     }
     load();
     const timer = setInterval(load, 20000);
@@ -62,9 +67,9 @@ export function MapPage() {
     return () => { cancelled = true; clearInterval(timer); socket?.off("incident:created", load); socket?.off("incident:updated", load); };
   }, []);
 
-  const openIncidents = incidents.filter(
-    (i) => i.status !== "REENCONTRO_REALIZADO" && i.status !== "CANCELADA" && i.latitude != null && i.longitude != null
-  );
+  // Status ja filtrado no servidor (open=true); aqui so falta descartar
+  // quem enviou o alerta pelo formulario de referencia (sem GPS).
+  const openIncidents = incidents.filter((i) => i.latitude != null && i.longitude != null);
 
   // Centraliza na primeira tenda ativa cadastrada; sem tendas, usa o
   // padrao (sede da operacao) em vez de um ponto fixo que pode nao
@@ -83,6 +88,12 @@ export function MapPage() {
         mesmos dados, consulte o <a href="/painel" className="underline">Painel</a>.
       </p>
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+      {firstLoad && (
+        <p role="status" aria-live="polite" className="flex items-center gap-2 text-sm text-ocean-600">
+          <Spinner className="h-4 w-4" />
+          Carregando ocorrências e tendas...
+        </p>
+      )}
       <div
         role="application"
         aria-label={`Mapa com ${openIncidents.length} ocorrência(s) aberta(s) e ${tents.length} tenda(s) ativa(s)`}

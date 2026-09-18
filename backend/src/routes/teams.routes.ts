@@ -8,8 +8,15 @@ import { validateBody, activeSchema } from "../middlewares/validate";
 const router = Router();
 router.use(authenticate);
 
+// Ver comentario equivalente em beaches.routes.ts.
+const REFERENCE_LIST_SAFETY_LIMIT = 300;
+
 router.get("/", authorize("ADMIN", "ATENDENTE", "EQUIPE_CAMPO"), asyncHandler(async (req, res) => {
-  const teams = await prisma.team.findMany({ where: req.query.includeInactive === "true" && req.user!.role === "ADMIN" ? undefined : { active: true }, orderBy: { name: "asc" } });
+  const teams = await prisma.team.findMany({
+    where: req.query.includeInactive === "true" && req.user!.role === "ADMIN" ? undefined : { active: true },
+    orderBy: { name: "asc" },
+    take: REFERENCE_LIST_SAFETY_LIMIT,
+  });
   res.json(teams);
 }));
 

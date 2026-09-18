@@ -261,6 +261,7 @@ export function EncontreiPage() {
   const [liveStatus, setLiveStatus] = useState<IncidentStatus>("CRIANCA_LOCALIZADA");
 
   const [beaches, setBeaches] = useState<Beach[]>([]);
+  const [loadingBeaches, setLoadingBeaches] = useState(false);
   const [selectedBeachId, setSelectedBeachId] = useState("");
   const [referencePoint, setReferencePoint] = useState("");
 
@@ -415,9 +416,11 @@ export function EncontreiPage() {
 
   useEffect(() => {
     if (step === "fallback" && beaches.length === 0) {
+      setLoadingBeaches(true);
       apiRequest<Beach[]>("/public/beaches")
         .then(setBeaches)
-        .catch(() => setError(t.beachesLoadError));
+        .catch(() => setError(t.beachesLoadError))
+        .finally(() => setLoadingBeaches(false));
     }
   }, [step, beaches.length, t.beachesLoadError]);
 
@@ -527,9 +530,10 @@ export function EncontreiPage() {
                 id="beach"
                 value={selectedBeachId}
                 onChange={(e) => setSelectedBeachId(e.target.value)}
-                className="w-full rounded-xl border-2 border-ocean-200 px-4 py-3 text-lg text-ocean-900 focus:border-ocean-500"
+                disabled={loadingBeaches}
+                className="w-full rounded-xl border-2 border-ocean-200 px-4 py-3 text-lg text-ocean-900 focus:border-ocean-500 disabled:opacity-60"
               >
-                <option value="">{t.selectPlaceholder}</option>
+                <option value="">{loadingBeaches ? t.loading : t.selectPlaceholder}</option>
                 {beaches.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name} — {b.city}

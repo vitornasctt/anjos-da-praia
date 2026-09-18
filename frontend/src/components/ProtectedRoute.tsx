@@ -1,5 +1,6 @@
 import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { Spinner } from "./Spinner";
 import { Role } from "../types";
 
 export function ProtectedRoute({ roles }: { roles?: Role[] }) {
@@ -7,7 +8,8 @@ export function ProtectedRoute({ roles }: { roles?: Role[] }) {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-ocean-700">
+      <div role="status" aria-live="polite" className="flex min-h-screen flex-col items-center justify-center gap-3 text-ocean-700">
+        <Spinner className="h-6 w-6" />
         Carregando...
       </div>
     );

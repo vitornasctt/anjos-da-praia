@@ -81,6 +81,10 @@ export interface Incident {
   assignedTeam?: Team | null;
   statusHistory?: IncidentStatusHistoryEntry[];
   nearestTent?: { id: string; name: string; distanceMeters: number } | null;
+  // So presente no detalhe (GET /incidents/:id) quando o alerta nao tem GPS
+  // mas tem praia informada: tenda de apoio daquela praia, como ponto
+  // aproximado pra abrir no mapa (nao e a localizacao exata da crianca).
+  beachTent?: { id: string; name: string; latitude: number; longitude: number } | null;
 }
 
 export interface IncidentStatusHistoryEntry {
@@ -96,4 +100,13 @@ export interface IncidentSummary {
   enRoute: number;
   inService: number;
   resolvedToday: number;
+  oldFinalized: number;
+}
+
+// Resposta paginada por cursor (keyset), usada por listas que podem
+// crescer sem limite (ocorrencias, usuarios, familias).
+export interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
+  total: number;
 }

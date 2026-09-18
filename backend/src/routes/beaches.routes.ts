@@ -10,8 +10,14 @@ import { HttpError } from "../utils/httpError";
 const router = Router();
 router.use(authenticate);
 
+// Lista de referencia usada em selects/formularios: a UI precisa do
+// conjunto inteiro (nao faz sentido paginar um <select>), mas um teto de
+// seguranca evita uma consulta genuinamente sem limite se o cadastro
+// crescer muito ao longo de varias temporadas.
+const REFERENCE_LIST_SAFETY_LIMIT = 300;
+
 router.get("/", authorize("ADMIN", "ATENDENTE", "EQUIPE_CAMPO"), asyncHandler(async (_req, res) => {
-  const beaches = await prisma.beach.findMany({ orderBy: { name: "asc" }, include: { tents: true } });
+  const beaches = await prisma.beach.findMany({ orderBy: { name: "asc" }, include: { tents: true }, take: REFERENCE_LIST_SAFETY_LIMIT });
   res.json(beaches);
 }));
 

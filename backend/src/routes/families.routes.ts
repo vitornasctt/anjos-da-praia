@@ -1,5 +1,6 @@
 import { asyncHandler } from "../middlewares/asyncHandler";
 import { Router } from "express";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { authenticate, authorize } from "../middlewares/auth";
@@ -8,6 +9,7 @@ import { audit } from "../utils/audit";
 import { serializable } from "../lib/transaction";
 import { HttpError } from "../utils/httpError";
 import { ANONYMIZED_LABEL, FINAL } from "../jobs/dataRetention";
+import { paginationQuerySchema, takeForPage, splitPage, MAX_PAGE_SIZE } from "../utils/pagination";
 
 const router = Router();
 router.use(authenticate, authorize("ADMIN", "ATENDENTE"));
@@ -67,17 +69,32 @@ router.post("/intake", validateBody(intakeSchema), asyncHandler(async (req, res)
   res.status(201).json(result);
 }));
 
+const listQuerySchema = paginationQuerySchema.extend({
+  search: z.string().trim().max(120).optional(),
+});
+
 router.get("/", asyncHandler(async (req, res) => {
-  const search = String(req.query.search ?? "").trim();
-  const families = await prisma.family.findMany({
-    where: {
-      responsibleName: { not: ANONYMIZED_LABEL, ...(search ? { contains: search } : {}) },
-    },
-    include: { children: { include: { wristbands: true } } },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-  });
-  res.json(families);
+  const parsed = listQuerySchema.safeParse(req.query);
+  if (!parsed.success) throw new HttpError(400, "Parametros de busca invalidos.");
+  const { cursor, search } = parsed.data;
+  const limit = Math.min(parsed.data.limit ?? 20, MAX_PAGE_SIZE);
+
+  const where: Prisma.FamilyWhereInput = {
+    responsibleName: { not: ANONYMIZED_LABEL, ...(search ? { contains: search, mode: "insensitive" } : {}) },
+  };
+
+  const [rows, total] = await Promise.all([
+    prisma.family.findMany({
+      where,
+      include: { children: { include: { wristbands: true } } },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      take: takeForPage(limit),
+    }),
+    prisma.family.count({ where }),
+  ]);
+  const { items, nextCursor } = splitPage(rows, limit);
+  res.json({ items, nextCursor, total });
 }));
 
 router.get("/:id", asyncHandler(async (req, res) => {

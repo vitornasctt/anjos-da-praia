@@ -20,8 +20,13 @@ router.get("/overview", asyncHandler(async (_req, res) => {
     prisma.incident.count(),
     prisma.beach.findMany(),
     prisma.tent.findMany({ where: { active: true } }),
+    // Esta agregacao (por praia/tenda/horario) genuinamente precisa
+    // percorrer todas as ocorrencias - nao e uma lista paginavel na UI.
+    // O teto abaixo e so uma rede de seguranca contra crescimento sem
+    // limite nenhum, nao uma paginacao real.
     prisma.incident.findMany({
       select: { id: true, createdAt: true, resolvedAt: true, status: true, beachId: true, latitude: true, longitude: true },
+      take: 50_000,
     }),
   ]);
 

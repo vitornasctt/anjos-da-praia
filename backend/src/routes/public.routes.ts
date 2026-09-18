@@ -54,7 +54,9 @@ router.get("/incidents/:id/status", asyncHandler(async (req, res) => {
 }));
 
 router.get("/beaches", asyncHandler(async (_req, res) => {
-  const beaches = await prisma.beach.findMany({ orderBy: { name: "asc" } });
+  // Lista de referencia para o <select> do fallback publico - teto de
+  // seguranca, ver mesmo padrao em beaches.routes.ts.
+  const beaches = await prisma.beach.findMany({ orderBy: { name: "asc" }, take: 300 });
   res.json(beaches);
 }));
 

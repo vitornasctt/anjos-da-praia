@@ -1,7 +1,8 @@
-import { FormEvent, useEffect, useState } from "react";
-import { Tent as TentIcon } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Tent as TentIcon, Search, X } from "lucide-react";
 import { apiRequest, ApiError } from "../../services/api";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { SkeletonRows } from "../../components/Skeleton";
 import { Beach, Tent, Team } from "../../types";
 
 type DeleteTarget = { kind: "beach"; item: Beach } | { kind: "tent"; item: Tent };
@@ -12,36 +13,65 @@ export function TentsBeachesPage() {
   const [savingTeam, setSavingTeam] = useState(false);
   const [beaches, setBeaches] = useState<Beach[]>([]);
   const [tents, setTents] = useState<Tent[]>([]);
+  const [loadingLists, setLoadingLists] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [savingBeach, setSavingBeach] = useState(false);
+  const [savingTent, setSavingTent] = useState(false);
+  // ids em transicao otimista (toggle ativo/inativo) - permite reverter
+  // a troca local se o PATCH falhar, sem esperar o servidor pra refletir
+  // uma mudanca de estado trivialmente reversivel.
+  const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
 
   const [beachForm, setBeachForm] = useState({ name: "", city: "" });
   const [tentForm, setTentForm] = useState({ beachId: "", name: "", latitude: "", longitude: "" });
+  // Lista de referencia (teto de seguranca no backend, ver tents.routes.ts) -
+  // filtro so no cliente, sem round trip extra, pois o conjunto ja esta
+  // inteiro em memoria e um cadastro cresce por temporadas, nao por milhares.
+  const [tentFilter, setTentFilter] = useState("");
+  const filteredTents = useMemo(() => {
+    const term = tentFilter.trim().toLowerCase();
+    if (!term) return tents;
+    return tents.filter((t) => t.name.toLowerCase().includes(term) || t.beach?.name.toLowerCase().includes(term));
+  }, [tents, tentFilter]);
 
-  function loadAll() {
-    apiRequest<Beach[]>("/beaches").then(setBeaches).catch(() => setError("Não foi possível carregar as praias."));
-    apiRequest<Tent[]>("/tents").then(setTents).catch(() => setError("Não foi possível carregar as tendas."));
-    apiRequest<Team[]>("/teams?includeInactive=true").then(setTeams).catch(() => setError("Não foi possível carregar as equipes."));
+  async function loadAll() {
+    const [beachesResult, tentsResult, teamsResult] = await Promise.allSettled([
+      apiRequest<Beach[]>("/beaches"),
+      apiRequest<Tent[]>("/tents"),
+      apiRequest<Team[]>("/teams?includeInactive=true"),
+    ]);
+    if (beachesResult.status === "fulfilled") setBeaches(beachesResult.value);
+    else setError("Não foi possível carregar as praias.");
+    if (tentsResult.status === "fulfilled") setTents(tentsResult.value);
+    else setError("Não foi possível carregar as tendas.");
+    if (teamsResult.status === "fulfilled") setTeams(teamsResult.value);
+    else setError("Não foi possível carregar as equipes.");
+    setLoadingLists(false);
   }
 
-  useEffect(loadAll, []);
+  useEffect(() => { loadAll(); }, []);
 
   async function handleBeachSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    setSavingBeach(true);
     try {
       await apiRequest("/beaches", { method: "POST", body: beachForm });
       setBeachForm({ name: "", city: "" });
-      loadAll();
+      await loadAll();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Não foi possível cadastrar a praia.");
+    } finally {
+      setSavingBeach(false);
     }
   }
 
   async function handleTentSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    setSavingTent(true);
     try {
       await apiRequest("/tents", {
         method: "POST",
@@ -53,22 +83,40 @@ export function TentsBeachesPage() {
         },
       });
       setTentForm({ beachId: "", name: "", latitude: "", longitude: "" });
-      loadAll();
+      await loadAll();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Não foi possível cadastrar a tenda.");
+    } finally {
+      setSavingTent(false);
     }
   }
 
   async function handleTeamSubmit(e: FormEvent) {
     e.preventDefault(); setError(null); setSavingTeam(true);
-    try { await apiRequest("/teams", { method: "POST", body: { name: teamName } }); setTeamName(""); loadAll(); }
+    try { await apiRequest("/teams", { method: "POST", body: { name: teamName } }); setTeamName(""); await loadAll(); }
     catch (err) { setError(err instanceof ApiError ? err.message : "Não foi possível cadastrar a equipe."); }
     finally { setSavingTeam(false); }
   }
+
+  // Optimistic: o toggle ativo/inativo e trivialmente reversivel (basta
+  // reexibir o valor anterior), entao a UI muda na hora e so reverte se o
+  // PATCH falhar de verdade - sem esperar round-trip pra um clique simples.
   async function toggleActive(kind: "teams" | "tents", item: Team | Tent) {
     setError(null);
-    try { await apiRequest(`/${kind}/${item.id}`, { method: "PATCH", body: { active: !item.active } }); loadAll(); }
-    catch (err) { setError(err instanceof ApiError ? err.message : "Não foi possível atualizar."); }
+    setTogglingIds((prev) => new Set(prev).add(item.id));
+    const nextActive = !item.active;
+    if (kind === "teams") setTeams((prev) => prev.map((t) => (t.id === item.id ? { ...t, active: nextActive } : t)));
+    else setTents((prev) => prev.map((t) => (t.id === item.id ? { ...t, active: nextActive } : t)));
+    try {
+      await apiRequest(`/${kind}/${item.id}`, { method: "PATCH", body: { active: nextActive } });
+    } catch (err) {
+      // rollback: volta pro estado anterior porque o servidor nao confirmou
+      if (kind === "teams") setTeams((prev) => prev.map((t) => (t.id === item.id ? { ...t, active: item.active } : t)));
+      else setTents((prev) => prev.map((t) => (t.id === item.id ? { ...t, active: item.active } : t)));
+      setError(err instanceof ApiError ? err.message : "Não foi possível atualizar.");
+    } finally {
+      setTogglingIds((prev) => { const next = new Set(prev); next.delete(item.id); return next; });
+    }
   }
 
   async function confirmDelete() {
@@ -101,18 +149,26 @@ export function TentsBeachesPage() {
           <input id="teamName" value={teamName} onChange={(e) => setTeamName(e.target.value)} required minLength={2} maxLength={80} placeholder="Nome da equipe" className="rounded-lg border border-ocean-200 px-3 py-2" />
           <button disabled={savingTeam} className="rounded-lg bg-ocean-600 px-4 py-2 font-semibold text-white disabled:opacity-60">{savingTeam ? "Salvando..." : "Cadastrar equipe"}</button>
         </form>
-        <ul className="mt-4 divide-y divide-ocean-50 text-sm">{teams.map((team) => (
-          <li key={team.id} className="flex justify-between gap-3 py-2">
-            <span>{team.name} {team.active ? "" : "(inativa)"}</span>
-            <button
-              onClick={() => toggleActive("teams", team)}
-              aria-label={`${team.active ? "Desativar" : "Ativar"} equipe ${team.name}`}
-              className="text-ocean-600 underline"
-            >
-              {team.active ? "Desativar" : "Ativar"}
-            </button>
-          </li>
-        ))}</ul>
+        {loadingLists ? (
+          <SkeletonRows count={2} className="mt-4" />
+        ) : (
+          <ul className="mt-4 divide-y divide-ocean-50 text-sm">
+            {teams.map((team) => (
+              <li key={team.id} className="flex justify-between gap-3 py-2">
+                <span>{team.name} {team.active ? "" : "(inativa)"}</span>
+                <button
+                  onClick={() => toggleActive("teams", team)}
+                  disabled={togglingIds.has(team.id)}
+                  aria-label={`${team.active ? "Desativar" : "Ativar"} equipe ${team.name}`}
+                  className="text-ocean-600 underline disabled:opacity-50"
+                >
+                  {team.active ? "Desativar" : "Ativar"}
+                </button>
+              </li>
+            ))}
+            {teams.length === 0 && <p className="py-2 text-ocean-500">Nenhuma equipe cadastrada ainda.</p>}
+          </ul>
+        )}
       </section>
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="rounded-xl border border-ocean-100 bg-white p-6 shadow-sm">
@@ -136,24 +192,29 @@ export function TentsBeachesPage() {
               required
               className="w-full rounded-lg border border-ocean-200 px-3 py-2"
             />
-            <button type="submit" className="rounded-lg bg-ocean-600 px-4 py-2 font-semibold text-white hover:bg-ocean-700">
-              Cadastrar praia
+            <button type="submit" disabled={savingBeach} className="rounded-lg bg-ocean-600 px-4 py-2 font-semibold text-white hover:bg-ocean-700 disabled:opacity-60">
+              {savingBeach ? "Salvando..." : "Cadastrar praia"}
             </button>
           </form>
-          <ul className="mt-4 divide-y divide-ocean-50 text-sm">
-            {beaches.map((b) => (
-              <li key={b.id} className="flex items-center justify-between gap-2 py-2">
-                <span>{b.name} — {b.city}</span>
-                <button
-                  onClick={() => setDeleteTarget({ kind: "beach", item: b })}
-                  aria-label={`Excluir praia ${b.name}`}
-                  className="text-red-600 underline"
-                >
-                  Excluir
-                </button>
-              </li>
-            ))}
-          </ul>
+          {loadingLists ? (
+            <SkeletonRows count={2} className="mt-4" />
+          ) : (
+            <ul className="mt-4 divide-y divide-ocean-50 text-sm">
+              {beaches.map((b) => (
+                <li key={b.id} className="flex items-center justify-between gap-2 py-2">
+                  <span>{b.name} — {b.city}</span>
+                  <button
+                    onClick={() => setDeleteTarget({ kind: "beach", item: b })}
+                    aria-label={`Excluir praia ${b.name}`}
+                    className="text-red-600 underline"
+                  >
+                    Excluir
+                  </button>
+                </li>
+              ))}
+              {beaches.length === 0 && <p className="py-2 text-ocean-500">Nenhuma praia cadastrada ainda.</p>}
+            </ul>
+          )}
         </div>
 
         <div className="rounded-xl border border-ocean-100 bg-white p-6 shadow-sm">
@@ -201,18 +262,45 @@ export function TentsBeachesPage() {
                 className="w-full rounded-lg border border-ocean-200 px-3 py-2"
               />
             </div>
-            <button type="submit" className="rounded-lg bg-ocean-600 px-4 py-2 font-semibold text-white hover:bg-ocean-700">
-              Cadastrar tenda
+            <button type="submit" disabled={savingTent} className="rounded-lg bg-ocean-600 px-4 py-2 font-semibold text-white hover:bg-ocean-700 disabled:opacity-60">
+              {savingTent ? "Salvando..." : "Cadastrar tenda"}
             </button>
           </form>
+          {!loadingLists && tents.length > 0 && (
+            <div className="mt-4">
+              <label htmlFor="tentFilter" className="sr-only">Filtrar tendas por nome ou praia</label>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ocean-400" aria-hidden="true" />
+                <input
+                  id="tentFilter"
+                  value={tentFilter}
+                  onChange={(e) => setTentFilter(e.target.value)}
+                  placeholder="Filtrar tendas por nome ou praia"
+                  className="w-full rounded-lg border border-ocean-200 py-2 pl-9 pr-8 text-sm"
+                />
+                {tentFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setTentFilter("")}
+                    aria-label="Limpar filtro"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-ocean-400 hover:text-ocean-600"
+                  >
+                    <X className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {loadingLists && <SkeletonRows count={2} className="mt-4" />}
           <ul className="mt-4 divide-y divide-ocean-50 text-sm">
-            {tents.map((t) => (
+            {!loadingLists && filteredTents.map((t) => (
               <li key={t.id} className="py-2">
                 {t.name} — {t.beach?.name} {t.active ? "" : "(inativa)"}{" "}
                 <button
                   onClick={() => toggleActive("tents", t)}
+                  disabled={togglingIds.has(t.id)}
                   aria-label={`${t.active ? "Desativar" : "Ativar"} tenda ${t.name}`}
-                  className="ml-2 text-ocean-600 underline"
+                  className="ml-2 text-ocean-600 underline disabled:opacity-50"
                 >
                   {t.active ? "Desativar" : "Ativar"}
                 </button>{" "}
@@ -225,6 +313,10 @@ export function TentsBeachesPage() {
                 </button>
               </li>
             ))}
+            {!loadingLists && tents.length === 0 && <p className="py-2 text-ocean-500">Nenhuma tenda cadastrada ainda.</p>}
+            {!loadingLists && tents.length > 0 && filteredTents.length === 0 && (
+              <p role="status" className="py-2 text-ocean-500">Nenhuma tenda encontrada para "{tentFilter}".</p>
+            )}
           </ul>
         </div>
       </div>

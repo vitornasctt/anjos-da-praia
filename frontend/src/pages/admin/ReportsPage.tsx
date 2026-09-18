@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { BarChart3 } from "lucide-react";
 import { apiRequest, ApiError } from "../../services/api";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { SkeletonStatCards, Skeleton } from "../../components/Skeleton";
 
 interface Overview {
   families: number;
@@ -51,7 +52,19 @@ export function ReportsPage() {
   }
 
   if (loadError) return <div role="alert"><p className="text-red-600">Não foi possível carregar os relatórios.</p><button className="mt-2 underline" onClick={load}>Tentar novamente</button></div>;
-  if (!data) return <p className="text-ocean-500">Carregando relatórios...</p>;
+  if (!data) {
+    return (
+      <div className="space-y-6">
+        <h1 className="flex items-center gap-2 text-2xl font-bold text-ocean-900">
+          <BarChart3 className="h-6 w-6 text-ocean-600" aria-hidden="true" />
+          Relatórios
+        </h1>
+        <span className="sr-only" role="status" aria-live="polite">Carregando relatórios...</span>
+        <SkeletonStatCards />
+        <Skeleton className="h-24 w-full rounded-xl" />
+      </div>
+    );
+  }
 
   const maxHourCount = Math.max(1, ...data.incidentsByHour.map((h) => h.count));
 

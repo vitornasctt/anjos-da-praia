@@ -1,8 +1,13 @@
-import { ChangeEvent, FormEvent, useEffect, useId, useState } from "react";
-import { UserPlus } from "lucide-react";
+import { ChangeEvent, FormEvent, useId, useState } from "react";
+import { UserPlus, Search, X } from "lucide-react";
 import { apiRequest, ApiError } from "../../services/api";
 import { useAuth } from "../../context/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { Pagination } from "../../components/Pagination";
+import { Spinner } from "../../components/Spinner";
+import { SkeletonRows } from "../../components/Skeleton";
+import { useCursorPage } from "../../hooks/useCursorPage";
+import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { Family, Wristband } from "../../types";
 
 const emptyForm = {
@@ -47,14 +52,16 @@ function resizeImageToDataUrl(file: File): Promise<string> {
   });
 }
 
+const FAMILIES_PAGE_SIZE_KEY = "familiesPage.pageSize";
+
 export function IntakePage() {
   const { user } = useAuth();
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [families, setFamilies] = useState<Family[]>([]);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [processingPhoto, setProcessingPhoto] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<Family | null>(null);
 
@@ -62,11 +69,25 @@ export function IntakePage() {
   const [searchResult, setSearchResult] = useState<Wristband | null | "not_found">(null);
   const [searching, setSearching] = useState(false);
 
-  function loadFamilies() {
-    apiRequest<Family[]>("/families").then(setFamilies).catch(() => setError("Não foi possível carregar as famílias."));
-  }
+  const [familySearchInput, setFamilySearchInput] = useState("");
+  const familySearch = useDebouncedValue(familySearchInput);
+  const [familyPageSize, setFamilyPageSize] = useState(() => Number(localStorage.getItem(FAMILIES_PAGE_SIZE_KEY)) || 20);
+  const {
+    items: families,
+    total: familiesTotal,
+    loading: loadingFamilies,
+    error: familiesError,
+    hasNext: familiesHasNext,
+    hasPrevious: familiesHasPrevious,
+    goNext: familiesGoNext,
+    goPrevious: familiesGoPrevious,
+    reload: reloadFamilies,
+  } = useCursorPage<Family>({ path: "/families", pageSize: familyPageSize, search: familySearch });
 
-  useEffect(loadFamilies, []);
+  function handleFamilyPageSizeChange(size: number) {
+    setFamilyPageSize(size);
+    localStorage.setItem(FAMILIES_PAGE_SIZE_KEY, String(size));
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -77,7 +98,7 @@ export function IntakePage() {
       await apiRequest("/families/intake", { method: "POST", body: form });
       setSuccess(`Cadastro concluído! Pulseira #${form.printedNumber} associada a ${form.childFirstName}.`);
       setForm(emptyForm);
-      loadFamilies();
+      reloadFamilies();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Não foi possível concluir o cadastro.");
     } finally {
@@ -89,11 +110,14 @@ export function IntakePage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setPhotoError(null);
+    setProcessingPhoto(true);
     try {
       const dataUrl = await resizeImageToDataUrl(file);
       setForm((f) => ({ ...f, photoUrl: dataUrl }));
     } catch {
       setPhotoError("Não foi possível processar a foto. Tente outra imagem.");
+    } finally {
+      setProcessingPhoto(false);
     }
   }
 
@@ -104,7 +128,7 @@ export function IntakePage() {
     setError(null);
     try {
       await apiRequest(`/families/${family.id}/personal-data`, { method: "DELETE" });
-      loadFamilies();
+      reloadFamilies();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Não foi possível apagar os dados.");
     } finally {
@@ -169,9 +193,16 @@ export function IntakePage() {
               accept="image/*"
               capture="environment"
               onChange={handlePhotoChange}
-              className="text-sm text-ocean-700 file:mr-3 file:rounded-lg file:border-0 file:bg-ocean-100 file:px-3 file:py-2 file:font-semibold file:text-ocean-700"
+              disabled={processingPhoto}
+              className="text-sm text-ocean-700 file:mr-3 file:rounded-lg file:border-0 file:bg-ocean-100 file:px-3 file:py-2 file:font-semibold file:text-ocean-700 disabled:opacity-60"
             />
-            {form.photoUrl && (
+            {processingPhoto && (
+              <span role="status" aria-live="polite" className="flex items-center gap-1.5 text-sm text-ocean-600">
+                <Spinner className="h-4 w-4" />
+                Processando foto...
+              </span>
+            )}
+            {form.photoUrl && !processingPhoto && (
               <button
                 type="button"
                 onClick={() => setForm((f) => ({ ...f, photoUrl: "" }))}
@@ -229,30 +260,83 @@ export function IntakePage() {
       </div>
 
       <div className="rounded-xl border border-ocean-100 bg-white p-6 shadow-sm">
-        <h2 className="mb-3 text-lg font-bold text-ocean-900">Famílias cadastradas recentemente</h2>
-        <ul className="divide-y divide-ocean-50 text-sm">
-          {families.map((f) => (
-            <li key={f.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-              <span className="font-medium">{f.responsibleName}</span>
-              <span className="text-ocean-500">{f.responsiblePhone}</span>
-              <span>
-                {f.children?.map((c) => `${c.firstName} (#${c.wristbands?.[0]?.printedNumber ?? "—"})`).join(", ")}
-              </span>
-              {user?.role === "ADMIN" && (
-                <button
-                  type="button"
-                  onClick={() => setConfirmTarget(f)}
-                  disabled={deletingId === f.id}
-                  aria-label={`Apagar dados pessoais de ${f.responsibleName}`}
-                  className="text-sm font-medium text-red-600 underline disabled:opacity-60"
-                >
-                  {deletingId === f.id ? "Apagando..." : "Apagar dados pessoais"}
-                </button>
-              )}
-            </li>
-          ))}
-          {families.length === 0 && <p className="py-2 text-ocean-500">Nenhuma família cadastrada ainda.</p>}
-        </ul>
+        <h2 className="mb-3 text-lg font-bold text-ocean-900">Famílias cadastradas</h2>
+
+        <div className="mb-4">
+          <label htmlFor="familySearch" className="sr-only">Buscar família por nome do responsável</label>
+          <div className="relative max-w-sm">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ocean-400" aria-hidden="true" />
+            <input
+              id="familySearch"
+              value={familySearchInput}
+              onChange={(e) => setFamilySearchInput(e.target.value)}
+              placeholder="Buscar por nome do responsável"
+              className="w-full rounded-lg border border-ocean-200 py-2 pl-9 pr-8 text-sm"
+            />
+            {familySearchInput && (
+              <button
+                type="button"
+                onClick={() => setFamilySearchInput("")}
+                aria-label="Limpar busca"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-ocean-400 hover:text-ocean-600"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {familiesError && (
+          <div role="alert" className="mb-4 flex items-center gap-3 text-sm text-red-600">
+            <span>{familiesError}</span>
+            <button type="button" onClick={reloadFamilies} className="font-medium underline">Tentar novamente</button>
+          </div>
+        )}
+
+        {loadingFamilies ? (
+          <SkeletonRows count={Math.min(familyPageSize, 5)} />
+        ) : families.length === 0 ? (
+          <p className="py-2 text-ocean-500">
+            {familySearch ? `Nenhuma família encontrada para "${familySearch}".` : "Nenhuma família cadastrada ainda."}
+          </p>
+        ) : (
+          <ul className="divide-y divide-ocean-50 text-sm">
+            {families.map((f) => (
+              <li key={f.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <span className="font-medium">{f.responsibleName}</span>
+                <span className="text-ocean-500">{f.responsiblePhone}</span>
+                <span>
+                  {f.children?.map((c) => `${c.firstName} (#${c.wristbands?.[0]?.printedNumber ?? "—"})`).join(", ")}
+                </span>
+                {user?.role === "ADMIN" && (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmTarget(f)}
+                    disabled={deletingId === f.id}
+                    aria-label={`Apagar dados pessoais de ${f.responsibleName}`}
+                    className="text-sm font-medium text-red-600 underline disabled:opacity-60"
+                  >
+                    {deletingId === f.id ? "Apagando..." : "Apagar dados pessoais"}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {!loadingFamilies && familiesTotal > 0 && (
+          <div className="mt-4">
+            <Pagination
+              onPrevious={familiesGoPrevious}
+              onNext={familiesGoNext}
+              hasPrevious={familiesHasPrevious}
+              hasNext={familiesHasNext}
+              pageSize={familyPageSize}
+              onPageSizeChange={handleFamilyPageSizeChange}
+              rangeLabel={`${families.length} de ${familiesTotal} família(s)`}
+            />
+          </div>
+        )}
       </div>
 
       <ConfirmDialog

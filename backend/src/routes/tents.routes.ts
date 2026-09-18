@@ -9,8 +9,13 @@ import { audit } from "../utils/audit";
 const router = Router();
 router.use(authenticate);
 
+// Ver comentario equivalente em beaches.routes.ts: lista de referencia que
+// a UI precisa inteira, so com um teto de seguranca contra crescimento
+// sem limite ao longo de varias temporadas.
+const REFERENCE_LIST_SAFETY_LIMIT = 300;
+
 router.get("/", authorize("ADMIN", "ATENDENTE", "EQUIPE_CAMPO"), asyncHandler(async (_req, res) => {
-  const tents = await prisma.tent.findMany({ orderBy: { name: "asc" }, include: { beach: true } });
+  const tents = await prisma.tent.findMany({ orderBy: { name: "asc" }, include: { beach: true }, take: REFERENCE_LIST_SAFETY_LIMIT });
   res.json(tents);
 }));
 

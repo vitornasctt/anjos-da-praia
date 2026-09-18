@@ -1,5 +1,6 @@
 import { asyncHandler } from "../middlewares/asyncHandler";
 import { Router } from "express";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { authenticate, authorize } from "../middlewares/auth";
@@ -12,6 +13,7 @@ import { serializable } from "../lib/transaction";
 import { HttpError } from "../utils/httpError";
 import { operationDayStart } from "../utils/time";
 import { familyStatusMessage, sendFamilyMessage } from "../lib/notify";
+import { paginationQuerySchema, takeForPage, splitPage, MAX_PAGE_SIZE } from "../utils/pagination";
 
 // Enriquece uma ocorrencia com a tenda ativa mais proxima (item 13/24.2),
 // calculada sob demanda a partir da localizacao - nada e persistido, pois
@@ -52,26 +54,93 @@ function isValidTransition(current: IncidentStatus, next: IncidentStatus): boole
   return nextIndex === currentIndex + 1;
 }
 
+// Mesma chave de filtro usada pelos cartoes do Painel (DashboardPage) -
+// mantem o contrato da API alinhado 1:1 com o que a UI realmente precisa,
+// em vez de expor um filtro de status generico que a UI teria que recompor.
+const FILTER_KEYS = ["open", "enRoute", "inService", "resolvedToday"] as const;
+type FilterKey = (typeof FILTER_KEYS)[number];
+
+const listQuerySchema = paginationQuerySchema.extend({
+  filter: z.enum(FILTER_KEYS).optional(),
+  includeHistory: z.enum(["true", "false"]).optional(),
+  search: z.string().trim().max(20).optional(),
+  // Modo usado pelo mapa: so as ocorrencias em andamento agora, sem
+  // paginacao (o mapa precisa do conjunto inteiro para os marcadores),
+  // mas com um teto de seguranca - nunca "sem limite".
+  open: z.enum(["true"]).optional(),
+});
+
+function filterWhere(filter?: FilterKey): Prisma.IncidentWhereInput | undefined {
+  switch (filter) {
+    case "open":
+      return { status: "CRIANCA_LOCALIZADA" };
+    case "enRoute":
+      return { status: "EQUIPE_A_CAMINHO" };
+    case "inService":
+      return { status: { in: ["CRIANCA_RECEBIDA_PELA_EQUIPE", "RESPONSAVEIS_LOCALIZADOS"] } };
+    case "resolvedToday":
+      return { status: "REENCONTRO_REALIZADO", resolvedAt: { gte: operationDayStart() } };
+    default:
+      return undefined;
+  }
+}
+
+// Espelha isOldFinalized do DashboardPage: por padrao a lista esconde
+// atendimentos ja finalizados em dias anteriores, pra nao poluir a
+// primeira pagina com historico irrelevante para a operacao do dia.
+function excludeOldFinalizedWhere(): Prisma.IncidentWhereInput {
+  return {
+    OR: [
+      { status: { notIn: ["REENCONTRO_REALIZADO", "CANCELADA"] } },
+      { resolvedAt: { gte: operationDayStart() } },
+    ],
+  };
+}
+
+const MAP_SAFETY_LIMIT = 500;
+
 router.get("/", asyncHandler(async (req, res) => {
-  const parsed = z.enum(INCIDENT_STATUSES).optional().safeParse(req.query.status);
-  if (!parsed.success) throw new HttpError(400, "Status invalido.");
-  const statusFilter = parsed.data;
-  const incidents = await prisma.incident.findMany({
-    where: statusFilter ? { status: statusFilter } : undefined,
-    include: {
-      wristband: true,
-      beach: true,
-      assignedTeam: true,
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  const parsed = listQuerySchema.safeParse(req.query);
+  if (!parsed.success) throw new HttpError(400, "Parametros de busca invalidos.");
+  const { cursor, filter, includeHistory, search, open } = parsed.data;
+
+  const clauses: Prisma.IncidentWhereInput[] = [];
+  if (open === "true") {
+    clauses.push({ status: { notIn: ["REENCONTRO_REALIZADO", "CANCELADA"] } });
+  } else {
+    const forFilter = filterWhere(filter);
+    if (forFilter) clauses.push(forFilter);
+    // Uma busca por numero de pulseira e um pedido especifico ("cade essa
+    // pulseira?"), nao a visao operacional do dia - esconder historico
+    // antigo faria a busca dizer "nao encontrado" para algo que existe.
+    else if (includeHistory !== "true" && !search) clauses.push(excludeOldFinalizedWhere());
+  }
+  if (search) clauses.push({ wristband: { printedNumber: { contains: search } } });
+  const where: Prisma.IncidentWhereInput | undefined = clauses.length > 0 ? { AND: clauses } : undefined;
+
+  const limit = open === "true" ? MAP_SAFETY_LIMIT : Math.min(parsed.data.limit ?? 20, MAX_PAGE_SIZE);
+
+  const [rows, total] = await Promise.all([
+    prisma.incident.findMany({
+      where,
+      include: { wristband: true, beach: true, assignedTeam: true },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      take: takeForPage(limit),
+    }),
+    prisma.incident.count({ where }),
+  ]);
+  const { items, nextCursor } = splitPage(rows, limit);
+
+  // Tendas ativas buscadas uma unica vez por requisicao e reaproveitadas
+  // para enriquecer so os itens da pagina atual, nunca a tabela inteira.
   const tents = await prisma.tent.findMany({ where: { active: true } });
-  const enriched = await Promise.all(incidents.map((incident) => withNearestTent(incident, tents)));
-  res.json(enriched);
+  const enriched = await Promise.all(items.map((incident) => withNearestTent(incident, tents)));
+  res.json({ items: enriched, nextCursor, total });
 }));
 
 router.get("/summary", asyncHandler(async (_req, res) => {
-  const [open, enRoute, inService, resolvedToday] = await Promise.all([
+  const [open, enRoute, inService, resolvedToday, oldFinalized] = await Promise.all([
     prisma.incident.count({ where: { status: "CRIANCA_LOCALIZADA" } }),
     prisma.incident.count({ where: { status: "EQUIPE_A_CAMINHO" } }),
     prisma.incident.count({
@@ -83,8 +152,12 @@ router.get("/summary", asyncHandler(async (_req, res) => {
         resolvedAt: { gte: operationDayStart() },
       },
     }),
+    // Quantos atendimentos ficam de fora da visao padrao do Painel (ver
+    // excludeOldFinalizedWhere) - contagem no banco em vez de trazer as
+    // linhas so pra saber "quantas tem", como o front-end fazia antes.
+    prisma.incident.count({ where: { NOT: excludeOldFinalizedWhere() } }),
   ]);
-  res.json({ open, enRoute, inService, resolvedToday });
+  res.json({ open, enRoute, inService, resolvedToday, oldFinalized });
 }));
 
 // Dados minimos do responsavel so aparecem aqui - visao autorizada,
@@ -100,7 +173,22 @@ router.get("/:id", asyncHandler(async (req, res) => {
     },
   });
   if (!incident) return res.status(404).json({ error: "Ocorrencia nao encontrada." });
-  res.json(await withNearestTent(incident));
+  const enriched = await withNearestTent(incident);
+
+  // Sem GPS (quem encontrou usou o formulario de praia/ponto de referencia),
+  // mas com praia informada: a tenda de apoio daquela praia vira um ponto
+  // aproximado pra abrir no mapa - so nao fica "sem link nenhum" so porque
+  // nao temos coordenada exata do achado.
+  let beachTent = null;
+  if (incident.latitude == null && incident.beachId) {
+    beachTent = await prisma.tent.findFirst({
+      where: { beachId: incident.beachId, active: true },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, name: true, latitude: true, longitude: true },
+    });
+  }
+
+  res.json({ ...enriched, beachTent });
 }));
 
 const updateStatusSchema = z.object({

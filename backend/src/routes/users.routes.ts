@@ -1,6 +1,7 @@
 import { asyncHandler } from "../middlewares/asyncHandler";
 import { Router } from "express";
 import bcrypt from "bcryptjs";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { ROLES } from "../constants/enums";
@@ -8,16 +9,38 @@ import { authenticate, authorize } from "../middlewares/auth";
 import { validateBody, activeSchema } from "../middlewares/validate";
 import { audit } from "../utils/audit";
 import { disconnectUser } from "../lib/io";
+import { HttpError } from "../utils/httpError";
+import { paginationQuerySchema, takeForPage, splitPage, MAX_PAGE_SIZE } from "../utils/pagination";
 
 const router = Router();
 router.use(authenticate, authorize("ADMIN"));
 
-router.get("/", asyncHandler(async (_req, res) => {
-  const users = await prisma.user.findMany({
-    select: { id: true, name: true, email: true, role: true, active: true, createdAt: true },
-    orderBy: { createdAt: "desc" },
-  });
-  res.json(users);
+const listQuerySchema = paginationQuerySchema.extend({
+  search: z.string().trim().max(120).optional(),
+});
+
+router.get("/", asyncHandler(async (req, res) => {
+  const parsed = listQuerySchema.safeParse(req.query);
+  if (!parsed.success) throw new HttpError(400, "Parametros de busca invalidos.");
+  const { cursor, search } = parsed.data;
+  const limit = Math.min(parsed.data.limit ?? 20, MAX_PAGE_SIZE);
+
+  const where: Prisma.UserWhereInput | undefined = search
+    ? { OR: [{ name: { contains: search, mode: "insensitive" } }, { email: { contains: search, mode: "insensitive" } }] }
+    : undefined;
+
+  const [rows, total] = await Promise.all([
+    prisma.user.findMany({
+      where,
+      select: { id: true, name: true, email: true, role: true, active: true, createdAt: true },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      take: takeForPage(limit),
+    }),
+    prisma.user.count({ where }),
+  ]);
+  const { items, nextCursor } = splitPage(rows, limit);
+  res.json({ items, nextCursor, total });
 }));
 
 const createUserSchema = z.object({

@@ -82,6 +82,28 @@ test('historico seleciona somente id e nome, nunca hash ou email', async () => {
   assert.equal(result.status, 200);
   assert.ok(!JSON.stringify(result.body).includes('secret-hash'));
 });
+test('ocorrencia sem GPS mas com praia informada traz a tenda de apoio da praia como referencia aproximada', async () => {
+  mock.method(prisma.incident, 'findUnique', async () => ({
+    id: 'incident', latitude: null, longitude: null, beachId: 'beach-1', statusHistory: [],
+  }));
+  mock.method(prisma.tent, 'findFirst', async (query) => {
+    assert.deepEqual(query.where, { beachId: 'beach-1', active: true });
+    return { id: 'tent-1', name: 'Tenda 1', latitude: -20.5, longitude: -40.5 };
+  });
+  const result = await request('/incidents/incident');
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.beachTent, { id: 'tent-1', name: 'Tenda 1', latitude: -20.5, longitude: -40.5 });
+});
+test('ocorrencia com GPS proprio nao busca tenda da praia como aproximacao (ja tem localizacao exata)', async () => {
+  mock.method(prisma.incident, 'findUnique', async () => ({
+    id: 'incident', latitude: -20.1, longitude: -40.1, beachId: 'beach-1', statusHistory: [],
+  }));
+  mock.method(prisma.tent, 'findMany', async () => []);
+  mock.method(prisma.tent, 'findFirst', async () => { throw new Error('nao deveria buscar tenda da praia quando ja ha GPS'); });
+  const result = await request('/incidents/incident');
+  assert.equal(result.status, 200);
+  assert.equal(result.body.beachTent, null);
+});
 test('PATCH rejeita string false e ausencia do campo active', async () => {
   for (const resource of ['users', 'teams', 'tents']) {
     for (const body of [{ active: 'false' }, {}]) {
@@ -127,15 +149,69 @@ test('consultas de acompanhamento nao gastam a cota de envio', async () => {
   });
   assert.equal((await request('/public/incidents', { printedNumber: '4821', latitude: 0, longitude: 0 }, { public: true })).status, 201);
 });
-test('lista inclui ocorrencias alem das primeiras 100 e consulta tendas uma vez', async () => {
+test('lista pagina por cursor sem perder nenhuma das 105 ocorrencias e nunca busca mais que limit+1', async () => {
+  const rows = Array.from({ length: 105 }, (_, i) => ({
+    id: `inc-${String(i).padStart(3, '0')}`,
+    createdAt: new Date(2026, 0, 1, 0, 0, 105 - i),
+    latitude: 0,
+    longitude: 0,
+  }));
   mock.method(prisma.incident, 'findMany', async (query) => {
-    assert.equal(query.take, undefined);
-    return Array.from({ length: 105 }, (_, id) => ({ id, latitude: 0, longitude: 0 }));
+    assert.ok(query.take <= 21, `take deve ser <= 21 (limit padrao 20 + 1), recebeu ${query.take}`);
+    const startIndex = query.cursor ? rows.findIndex((r) => r.id === query.cursor.id) + 1 : 0;
+    return rows.slice(startIndex, startIndex + query.take);
   });
+  mock.method(prisma.incident, 'count', async () => rows.length);
   const tents = mock.method(prisma.tent, 'findMany', async () => []);
-  const result = await request('/incidents');
-  assert.equal(result.body.length, 105);
-  assert.equal(tents.mock.callCount(), 1);
+
+  const collected = [];
+  let cursor;
+  let total;
+  let pages = 0;
+  do {
+    const result = await request(cursor ? `/incidents?cursor=${cursor}` : '/incidents');
+    assert.equal(result.status, 200);
+    assert.ok(result.body.items.length <= 20);
+    collected.push(...result.body.items);
+    total = result.body.total;
+    cursor = result.body.nextCursor;
+    pages++;
+  } while (cursor && pages < 20);
+
+  assert.equal(collected.length, 105);
+  assert.equal(total, 105);
+  assert.equal(new Set(collected.map((i) => i.id)).size, 105, 'nenhum item duplicado entre paginas');
+  assert.equal(tents.mock.callCount(), pages, 'tendas buscadas uma vez por pagina, nunca por item');
+});
+test('lista de ocorrencias no mapa (open=true) exclui finalizadas e usa teto de seguranca, nao busca sem limite', async () => {
+  mock.method(prisma.incident, 'findMany', async (query) => {
+    assert.deepEqual(query.where, { AND: [{ status: { notIn: ['REENCONTRO_REALIZADO', 'CANCELADA'] } }] });
+    assert.equal(query.take, 501);
+    return [];
+  });
+  mock.method(prisma.incident, 'count', async () => 0);
+  mock.method(prisma.tent, 'findMany', async () => []);
+  const result = await request('/incidents?open=true');
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.items, []);
+});
+test('busca por numero da pulseira filtra no servidor, nao so na pagina carregada', async () => {
+  mock.method(prisma.incident, 'findMany', async (query) => {
+    assert.deepEqual(query.where.AND.find((c) => c.wristband), { wristband: { printedNumber: { contains: '4821' } } });
+    return [];
+  });
+  mock.method(prisma.incident, 'count', async () => 0);
+  mock.method(prisma.tent, 'findMany', async () => []);
+  assert.equal((await request('/incidents?search=4821')).status, 200);
+});
+test('busca por pulseira inclui historico antigo mesmo sem includeHistory (achado encontrado em prod: busca dizia "nao encontrado" pra pulseira que so existia fora da janela padrao)', async () => {
+  mock.method(prisma.incident, 'findMany', async (query) => {
+    assert.deepEqual(query.where, { AND: [{ wristband: { printedNumber: { contains: '4821' } } }] });
+    return [];
+  });
+  mock.method(prisma.incident, 'count', async () => 0);
+  mock.method(prisma.tent, 'findMany', async () => []);
+  assert.equal((await request('/incidents?search=4821')).status, 200);
 });
 test('cancelamento grava data de encerramento e historico na mesma transacao', async () => {
   let history, audit;
@@ -202,6 +278,58 @@ test('retencao preserva familia com outro caso aberto e expira cadastro antigo s
 });
 test('prazo invalido nao executa expurgo', async () => {
   for (const days of [0, -1, NaN, 1.5, 3651]) await assert.rejects(purgeOldPersonalData(days), /Prazo/);
+});
+test('lista de usuarios pagina por cursor e busca por nome/e-mail no servidor', async () => {
+  const rows = Array.from({ length: 25 }, (_, i) => ({ id: `u-${i}`, name: `Usuario ${i}`, email: `u${i}@teste.com` }));
+  mock.method(prisma.user, 'findMany', async (query) => {
+    assert.ok(query.take <= 21);
+    const startIndex = query.cursor ? rows.findIndex((r) => r.id === query.cursor.id) + 1 : 0;
+    return rows.slice(startIndex, startIndex + query.take);
+  });
+  mock.method(prisma.user, 'count', async () => rows.length);
+  const collected = [];
+  let cursor;
+  do {
+    const result = await request(cursor ? `/users?cursor=${cursor}` : '/users');
+    assert.equal(result.status, 200);
+    collected.push(...result.body.items);
+    cursor = result.body.nextCursor;
+  } while (cursor);
+  assert.equal(collected.length, 25);
+});
+test('busca de usuarios usa OR case-insensitive em nome e e-mail, nunca filtra so no cliente', async () => {
+  mock.method(prisma.user, 'findMany', async (query) => {
+    assert.deepEqual(query.where, {
+      OR: [{ name: { contains: 'maria', mode: 'insensitive' } }, { email: { contains: 'maria', mode: 'insensitive' } }],
+    });
+    return [];
+  });
+  mock.method(prisma.user, 'count', async () => 0);
+  assert.equal((await request('/users?search=maria')).status, 200);
+});
+test('lista de familias pagina por cursor (sem teto fixo de 50) e nunca inclui cadastros anonimizados', async () => {
+  mock.method(prisma.family, 'findMany', async (query) => {
+    assert.equal(query.where.responsibleName.not, '[dado removido - retencao LGPD]');
+    assert.ok(query.take <= 21);
+    return [];
+  });
+  mock.method(prisma.family, 'count', async () => 0);
+  const result = await request('/families');
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, { items: [], nextCursor: null, total: 0 });
+});
+test('listas de referencia (praias/tendas/equipes) tem teto de seguranca, nunca consulta sem limite', async () => {
+  const beaches = mock.method(prisma.beach, 'findMany', async (query) => { assert.equal(query.take, 300); return []; });
+  assert.equal((await request('/beaches')).status, 200);
+  assert.equal(beaches.mock.callCount(), 1);
+
+  const tents = mock.method(prisma.tent, 'findMany', async (query) => { assert.equal(query.take, 300); return []; });
+  assert.equal((await request('/tents')).status, 200);
+  assert.equal(tents.mock.callCount(), 1);
+
+  const teams = mock.method(prisma.team, 'findMany', async (query) => { assert.equal(query.take, 300); return []; });
+  assert.equal((await request('/teams')).status, 200);
+  assert.equal(teams.mock.callCount(), 1);
 });
 test('horarios e inicio do dia seguem Brasilia mesmo com servidor UTC', () => {
   const date = new Date('2026-09-14T02:30:00Z');

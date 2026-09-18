@@ -5,6 +5,7 @@ import { apiRequest, ApiError } from "../../services/api";
 import { Incident, IncidentStatus, Team } from "../../types";
 import { StatusBadge } from "../../components/StatusBadge";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { Skeleton } from "../../components/Skeleton";
 import { useAuth } from "../../context/AuthContext";
 
 const STATUS_ORDER: IncidentStatus[] = [
@@ -95,9 +96,34 @@ export function IncidentDetailPage() {
   }
 
   if (error && !incident) {
-    return <p className="text-red-600">{error}</p>;
+    return (
+      <div role="alert" className="space-y-3">
+        <Link to="/painel" className="text-sm font-medium text-ocean-600 underline">← Voltar ao painel</Link>
+        <p className="text-red-600">{error}</p>
+        <button onClick={() => load(true)} className="text-sm font-medium text-ocean-600 underline">Tentar novamente</button>
+      </div>
+    );
   }
-  if (!incident) return <p className="text-ocean-500">Carregando...</p>;
+  if (!incident) {
+    return (
+      <div className="space-y-6" role="status" aria-live="polite">
+        <span className="sr-only">Carregando ocorrência...</span>
+        <Skeleton className="h-5 w-32" />
+        <div className="rounded-xl border border-ocean-100 bg-white p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-7 w-40" />
+            <Skeleton className="h-6 w-32 rounded-full" />
+          </div>
+          <Skeleton className="h-4 w-56" />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-20 w-full" />
+          </div>
+          <Skeleton className="h-12 w-full" />
+        </div>
+      </div>
+    );
+  }
 
   const nextStatus = STATUS_ORDER[STATUS_ORDER.indexOf(incident.status) + 1];
   const isFinal = incident.status === "REENCONTRO_REALIZADO" || incident.status === "CANCELADA";
@@ -133,7 +159,23 @@ export function IncidentDetailPage() {
               </a>
             ) : (
               <p>
-                {incident.beach?.name ?? "Praia não informada"}
+                {incident.beach ? (
+                  incident.beachTent ? (
+                    <a
+                      href={`https://www.openstreetmap.org/?mlat=${incident.beachTent.latitude}&mlon=${incident.beachTent.longitude}#map=16/${incident.beachTent.latitude}/${incident.beachTent.longitude}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="Sem GPS do achado - abre o mapa na tenda de apoio desta praia, como referência aproximada."
+                      className="font-medium text-ocean-600 underline"
+                    >
+                      {incident.beach.name}
+                    </a>
+                  ) : (
+                    incident.beach.name
+                  )
+                ) : (
+                  "Praia não informada"
+                )}
                 {incident.referencePoint && ` — ${incident.referencePoint}`}
               </p>
             )}

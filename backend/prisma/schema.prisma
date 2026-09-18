@@ -34,6 +34,7 @@ model User {
   assignedIncidents   Incident[]       @relation("IncidentAssignedTeamMember")
   auditLogs           AuditLog[]
 
+  @@index([createdAt])
   @@map("users")
 }
 
@@ -74,6 +75,7 @@ model Family {
   registeredBy User?      @relation("FamilyRegisteredBy", fields: [registeredById], references: [id])
   children     Child[]
 
+  @@index([createdAt])
   @@map("families")
 }
 

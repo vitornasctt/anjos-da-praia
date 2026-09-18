@@ -1,15 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { LayoutDashboard } from "lucide-react";
+import { LayoutDashboard, Search, X } from "lucide-react";
 import { apiRequest } from "../../services/api";
 import { getSocket } from "../../services/socket";
-import { Incident, IncidentSummary } from "../../types";
+import { Incident, IncidentSummary, Page } from "../../types";
 import { StatusBadge } from "../../components/StatusBadge";
+import { Spinner } from "../../components/Spinner";
+import { SkeletonStatCards, SkeletonRows } from "../../components/Skeleton";
+import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 
 // O WebSocket cobre o caso comum (atualizacao quase instantanea); o
 // polling continua como rede de seguranca caso a conexao em tempo real
 // caia, por isso o intervalo pode ser mais espaçado do que antes.
 const POLL_INTERVAL_MS = 20000;
+const PAGE_SIZE = 20;
 
 type FilterKey = "open" | "enRoute" | "inService" | "resolvedToday";
 
@@ -20,120 +24,129 @@ const FILTER_LABEL: Record<FilterKey, string> = {
   resolvedToday: "Reencontros hoje",
 };
 
-// Mesma regra do backend (rota /incidents/summary) para o "dia de
-// operacao" comecar a meia-noite no horario de Brasilia, independente
-// do fuso do navegador de quem estiver olhando o painel.
-function operationDayStartMs(): number {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Sao_Paulo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const value = (type: string) => parts.find((p) => p.type === type)!.value;
-  return new Date(`${value("year")}-${value("month")}-${value("day")}T00:00:00-03:00`).getTime();
-}
-
-function isFinalStatus(status: Incident["status"]): boolean {
-  return status === "REENCONTRO_REALIZADO" || status === "CANCELADA";
-}
-
-// Ocorrencias finalizadas (reencontro ou cancelada) em dias anteriores ficam
-// fora da lista por padrao, para o Painel nao virar uma rolagem infinita -
-// mas continuam disponiveis via o link "Ver historico completo".
-function isOldFinalized(incident: Incident, todayStartMs: number): boolean {
-  return (
-    isFinalStatus(incident.status) &&
-    (incident.resolvedAt == null || new Date(incident.resolvedAt).getTime() < todayStartMs)
-  );
-}
-
-function matchesFilter(incident: Incident, key: FilterKey): boolean {
-  switch (key) {
-    case "open":
-      return incident.status === "CRIANCA_LOCALIZADA";
-    case "enRoute":
-      return incident.status === "EQUIPE_A_CAMINHO";
-    case "inService":
-      return incident.status === "CRIANCA_RECEBIDA_PELA_EQUIPE" || incident.status === "RESPONSAVEIS_LOCALIZADOS";
-    case "resolvedToday":
-      return (
-        incident.status === "REENCONTRO_REALIZADO" &&
-        incident.resolvedAt != null &&
-        new Date(incident.resolvedAt).getTime() >= operationDayStartMs()
-      );
-  }
-}
-
 export function DashboardPage() {
   const [summary, setSummary] = useState<IncidentSummary | null>(null);
-  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [items, setItems] = useState<Incident[]>([]);
+  const [total, setTotal] = useState(0);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState(false);
   const [filter, setFilter] = useState<FilterKey | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const search = useDebouncedValue(searchInput);
   const realtimeAvailable = Boolean(getSocket());
+  const requestVersion = useRef(0);
 
   function toggleFilter(key: FilterKey) {
     setFilter((current) => (current === key ? null : key));
   }
 
-  const oldFinalizedCount = useMemo(() => {
-    const todayStart = operationDayStartMs();
-    return incidents.filter((incident) => isOldFinalized(incident, todayStart)).length;
-  }, [incidents]);
+  function buildParams(cursor?: string) {
+    const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+    if (cursor) params.set("cursor", cursor);
+    if (filter) params.set("filter", filter);
+    else if (showHistory) params.set("includeHistory", "true");
+    if (search) params.set("search", search);
+    return params;
+  }
 
-  const visibleIncidents = useMemo(() => {
-    if (filter) return incidents.filter((incident) => matchesFilter(incident, filter));
-    if (showHistory) return incidents;
-    const todayStart = operationDayStartMs();
-    return incidents.filter((incident) => !isOldFinalized(incident, todayStart));
-  }, [incidents, filter, showHistory]);
+  // Reseta e busca a primeira pagina - usado ao entrar na tela e sempre
+  // que filtro, busca ou "ver historico" mudam (preservando so o que faz
+  // sentido preservar: trocar de visao começa uma nova lista).
+  async function resetAndLoad() {
+    const version = ++requestVersion.current;
+    setLoading(true);
+    try {
+      const result = await apiRequest<Page<Incident>>(`/incidents?${buildParams().toString()}`);
+      if (version !== requestVersion.current) return;
+      setError(null);
+      setItems(result.items);
+      setTotal(result.total);
+      setNextCursor(result.nextCursor);
+    } catch {
+      if (version !== requestVersion.current) return;
+      setError("Não foi possível carregar as ocorrências.");
+    } finally {
+      if (version === requestVersion.current) setLoading(false);
+    }
+  }
+
+  // Atualizacao ao vivo (polling + socket): busca so a primeira pagina e
+  // mescla no que ja esta carregado - atualiza status de itens visiveis e
+  // traz ocorrencias novas pro topo, sem re-buscar a tabela inteira nem
+  // perder as paginas que o usuario ja abriu com "Carregar mais".
+  async function refreshTop() {
+    const version = requestVersion.current;
+    try {
+      const result = await apiRequest<Page<Incident>>(`/incidents?${buildParams().toString()}`);
+      if (version !== requestVersion.current) return;
+      setError(null);
+      setTotal(result.total);
+      setItems((prev) => {
+        const freshIds = new Set(result.items.map((i) => i.id));
+        const rest = prev.filter((i) => !freshIds.has(i.id));
+        return [...result.items, ...rest];
+      });
+    } catch {
+      if (version !== requestVersion.current) return;
+      setError("Não foi possível atualizar os dados agora.");
+    }
+  }
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    const version = requestVersion.current;
+    setLoadingMore(true);
+    try {
+      const result = await apiRequest<Page<Incident>>(`/incidents?${buildParams(nextCursor).toString()}`);
+      if (version !== requestVersion.current) return;
+      setError(null);
+      setItems((prev) => [...prev, ...result.items]);
+      setTotal(result.total);
+      setNextCursor(result.nextCursor);
+    } catch {
+      if (version !== requestVersion.current) return;
+      setError("Não foi possível carregar mais ocorrências.");
+    } finally {
+      if (version === requestVersion.current) setLoadingMore(false);
+    }
+  }
 
   useEffect(() => {
-    let cancelled = false;
+    loadSummary();
+    resetAndLoad();
 
-    async function load() {
-      try {
-        const [summaryData, incidentsData] = await Promise.all([
-          apiRequest<IncidentSummary>("/incidents/summary"),
-          apiRequest<Incident[]>("/incidents"),
-        ]);
-        if (!cancelled) {
-          setSummary(summaryData);
-          setIncidents(incidentsData);
-          setError(null);
-        }
-      } catch {
-        if (!cancelled) setError("Não foi possível atualizar os dados agora.");
-      }
-    }
-
-    load();
-    const interval = setInterval(load, POLL_INTERVAL_MS);
-
+    const interval = setInterval(() => { loadSummary(); refreshTop(); }, POLL_INTERVAL_MS);
     const socket = getSocket();
     const onConnect = () => setLive(true);
     const onDisconnect = () => setLive(false);
+    const onIncidentEvent = () => { loadSummary(); refreshTop(); };
     if (socket) {
       socket.on("connect", onConnect);
       socket.on("disconnect", onDisconnect);
-      socket.on("incident:created", load);
-      socket.on("incident:updated", load);
+      socket.on("incident:created", onIncidentEvent);
+      socket.on("incident:updated", onIncidentEvent);
       if (socket.connected) setLive(true);
     }
 
     return () => {
-      cancelled = true;
       clearInterval(interval);
       if (socket) {
         socket.off("connect", onConnect);
         socket.off("disconnect", onDisconnect);
-        socket.off("incident:created", load);
-        socket.off("incident:updated", load);
+        socket.off("incident:created", onIncidentEvent);
+        socket.off("incident:updated", onIncidentEvent);
       }
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, showHistory, search]);
+
+  function loadSummary() {
+    apiRequest<IncidentSummary>("/incidents/summary").then(setSummary).catch(() => {});
+  }
 
   const isNew = (createdAt: string) => Date.now() - new Date(createdAt).getTime() < 60000;
 
@@ -157,43 +170,76 @@ export function DashboardPage() {
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <SummaryCard
-          label="Ocorrências abertas"
-          value={summary?.open}
-          tone="red"
-          active={filter === "open"}
-          onClick={() => toggleFilter("open")}
-        />
-        <SummaryCard
-          label="Equipe a caminho"
-          value={summary?.enRoute}
-          tone="orange"
-          active={filter === "enRoute"}
-          onClick={() => toggleFilter("enRoute")}
-        />
-        <SummaryCard
-          label="Em atendimento"
-          value={summary?.inService}
-          tone="yellow"
-          active={filter === "inService"}
-          onClick={() => toggleFilter("inService")}
-        />
-        <SummaryCard
-          label="Reencontros hoje"
-          value={summary?.resolvedToday}
-          tone="green"
-          active={filter === "resolvedToday"}
-          onClick={() => toggleFilter("resolvedToday")}
-        />
+      {!summary ? (
+        <SkeletonStatCards />
+      ) : (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <SummaryCard
+            label="Ocorrências abertas"
+            value={summary.open}
+            tone="red"
+            active={filter === "open"}
+            onClick={() => toggleFilter("open")}
+          />
+          <SummaryCard
+            label="Equipe a caminho"
+            value={summary.enRoute}
+            tone="orange"
+            active={filter === "enRoute"}
+            onClick={() => toggleFilter("enRoute")}
+          />
+          <SummaryCard
+            label="Em atendimento"
+            value={summary.inService}
+            tone="yellow"
+            active={filter === "inService"}
+            onClick={() => toggleFilter("inService")}
+          />
+          <SummaryCard
+            label="Reencontros hoje"
+            value={summary.resolvedToday}
+            tone="green"
+            active={filter === "resolvedToday"}
+            onClick={() => toggleFilter("resolvedToday")}
+          />
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <label htmlFor="incidentSearch" className="sr-only">Buscar por número da pulseira</label>
+        <div className="relative max-w-xs flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ocean-400" aria-hidden="true" />
+          <input
+            id="incidentSearch"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Buscar por número da pulseira"
+            className="w-full rounded-lg border border-ocean-200 py-2 pl-9 pr-8 text-sm"
+          />
+          {searchInput && (
+            <button
+              type="button"
+              onClick={() => setSearchInput("")}
+              aria-label="Limpar busca"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-ocean-400 hover:text-ocean-600"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          )}
+        </div>
       </div>
 
-      {error && <p role="alert" className="text-sm font-medium text-red-600">{error}</p>}
+      {error && (
+        <div role="alert" className="flex items-center gap-3 text-sm font-medium text-red-600">
+          <span>{error}</span>
+          <button type="button" onClick={resetAndLoad} className="underline">Tentar novamente</button>
+        </div>
+      )}
 
       {filter && (
         <div role="status" aria-live="polite" className="flex items-center gap-2 text-sm text-ocean-700">
           <span>
-            Filtrando por: <strong>{FILTER_LABEL[filter]}</strong> ({visibleIncidents.length})
+            Filtrando por: <strong>{FILTER_LABEL[filter]}</strong> ({total})
           </span>
           <button onClick={() => setFilter(null)} className="font-medium text-ocean-600 underline">
             Limpar filtro
@@ -201,7 +247,7 @@ export function DashboardPage() {
         </div>
       )}
 
-      {!filter && oldFinalizedCount > 0 && (
+      {!filter && !search && summary && summary.oldFinalized > 0 && (
         <div className="flex justify-end">
           <button
             onClick={() => setShowHistory((current) => !current)}
@@ -209,18 +255,23 @@ export function DashboardPage() {
           >
             {showHistory
               ? "Ocultar ocorrências de dias anteriores"
-              : `Ver histórico completo (+${oldFinalizedCount} de dias anteriores)`}
+              : `Ver histórico completo (+${summary.oldFinalized} de dias anteriores)`}
           </button>
         </div>
       )}
 
       <div className="space-y-3">
-        {visibleIncidents.length === 0 && (
+        {loading && <SkeletonRows count={3} />}
+        {!loading && items.length === 0 && (
           <p className="rounded-lg border border-dashed border-ocean-200 bg-white p-6 text-center text-ocean-500">
-            {filter ? "Nenhuma ocorrência nesse status no momento." : "Nenhuma ocorrência registrada ainda."}
+            {search
+              ? `Nenhuma ocorrência encontrada para "${search}".`
+              : filter
+              ? "Nenhuma ocorrência nesse status no momento."
+              : "Nenhuma ocorrência registrada ainda."}
           </p>
         )}
-        {visibleIncidents.map((incident) => (
+        {items.map((incident) => (
           <Link
             key={incident.id}
             to={`/painel/ocorrencias/${incident.id}`}
@@ -254,6 +305,25 @@ export function DashboardPage() {
           </Link>
         ))}
       </div>
+
+      {!loading && items.length > 0 && (
+        <div className="flex flex-col items-center gap-2">
+          <p role="status" aria-live="polite" className="text-sm text-ocean-500">
+            {items.length} de {total} ocorrência(s)
+          </p>
+          {nextCursor && (
+            <button
+              type="button"
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="flex items-center gap-2 rounded-lg border border-ocean-200 px-4 py-2 text-sm font-semibold text-ocean-700 hover:bg-ocean-50 disabled:opacity-60"
+            >
+              {loadingMore && <Spinner className="h-4 w-4" />}
+              {loadingMore ? "Carregando..." : "Carregar mais"}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
