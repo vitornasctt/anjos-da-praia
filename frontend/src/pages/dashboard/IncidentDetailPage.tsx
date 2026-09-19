@@ -109,7 +109,7 @@ export function IncidentDetailPage() {
       <div className="space-y-6" role="status" aria-live="polite">
         <span className="sr-only">Carregando ocorrência...</span>
         <Skeleton className="h-5 w-32" />
-        <div className="rounded-xl border border-ocean-100 bg-white p-6 shadow-sm space-y-4">
+        <div className="rounded-xl border border-ocean-100 bg-white p-4 shadow-sm sm:p-6 space-y-4">
           <div className="flex items-center justify-between">
             <Skeleton className="h-7 w-40" />
             <Skeleton className="h-6 w-32 rounded-full" />
@@ -138,7 +138,7 @@ export function IncidentDetailPage() {
         ← Voltar ao painel
       </Link>
 
-      <div className="rounded-xl border border-ocean-100 bg-white p-6 shadow-sm">
+      <div className="rounded-xl border border-ocean-100 bg-white p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-bold text-ocean-900">
             Pulseira #{incident.wristband?.printedNumber}
@@ -269,7 +269,7 @@ export function IncidentDetailPage() {
         )}
       </div>
 
-      <div className="rounded-xl border border-ocean-100 bg-white p-6 shadow-sm">
+      <div className="rounded-xl border border-ocean-100 bg-white p-4 shadow-sm sm:p-6">
         <h2 className="mb-3 text-lg font-bold text-ocean-900">Histórico</h2>
         <ul className="space-y-2 text-sm">
           {incident.statusHistory?.map((h) => (

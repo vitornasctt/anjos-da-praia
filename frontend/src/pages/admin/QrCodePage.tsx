@@ -20,7 +20,7 @@ export function QrCodePage() {
         QR Code para imprimir
       </h1>
 
-      <div className="no-print rounded-xl border border-ocean-100 bg-white p-6 shadow-sm">
+      <div className="no-print rounded-xl border border-ocean-100 bg-white p-4 shadow-sm sm:p-6">
         <p className="text-ocean-800">
           Existe <strong>um único QR Code</strong>, igual para todas as pulseiras. Imprima uma vez
           e use em cartazes, tendas e nas pulseiras: quem achar a criança escaneia e digita o
@@ -57,7 +57,7 @@ export function QrCodePage() {
         <button
           type="button"
           onClick={() => window.print()}
-          className="mt-4 inline-flex items-center gap-2 rounded-xl bg-red-600 px-6 py-4 text-lg font-bold text-white shadow-md hover:bg-red-700"
+          className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 px-6 py-4 text-lg font-bold sm:w-auto text-white shadow-md hover:bg-red-700"
         >
           <Printer className="h-5 w-5" aria-hidden="true" />
           {sheet === "cartaz" ? "Imprimir cartaz" : "Imprimir folha de etiquetas"}
@@ -72,15 +72,15 @@ export function QrCodePage() {
 // Cartaz A4: leitura de longe, letras grandes, tres passos.
 function Poster() {
   return (
-    <div className="mx-auto flex max-w-2xl flex-col items-center gap-6 rounded-2xl border-4 border-ocean-600 bg-white p-8 text-center break-inside-avoid">
+    <div className="mx-auto flex max-w-2xl flex-col items-center gap-6 rounded-2xl border-4 border-ocean-600 bg-white p-5 text-center sm:p-8 break-inside-avoid">
       <div>
-        <h2 className="text-4xl font-extrabold text-ocean-900">Achou uma criança perdida?</h2>
+        <h2 className="text-3xl font-extrabold text-ocean-900 sm:text-4xl">Achou uma criança perdida?</h2>
         <p className="mt-1 text-base text-ocean-600">Found a lost child? · ¿Encontró a un niño perdido?</p>
       </div>
 
-      <QRCodeSVG value={PUBLIC_URL} size={280} level="Q" />
+      <QRCodeSVG value={PUBLIC_URL} size={280} level="Q" className="h-auto w-full max-w-[280px]" />
 
-      <ol className="w-full space-y-3 text-left text-2xl font-bold text-ocean-900">
+      <ol className="w-full space-y-3 text-left text-xl font-bold text-ocean-900 sm:text-2xl">
         <li className="flex items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ocean-600 text-white">1</span>
           Aponte a câmera do celular para o QR Code
@@ -103,7 +103,7 @@ function Poster() {
 // Folha de etiquetas adesivas, todas iguais, para colar nas pulseiras.
 function LabelSheet() {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 print:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 print:grid-cols-3">
       {Array.from({ length: LABELS_PER_SHEET }, (_, i) => (
         <div
           key={i}

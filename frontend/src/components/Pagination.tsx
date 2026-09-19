@@ -31,16 +31,16 @@ export function Pagination({
       <span role="status" aria-live="polite" className="text-ocean-600">
         {rangeLabel}
       </span>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <label htmlFor="pageSize" className="text-ocean-600">
-          Itens por pagina
+          Itens por página
         </label>
         <select
           id="pageSize"
           value={pageSize}
           onChange={(e) => onPageSizeChange(Number(e.target.value))}
           disabled={busy}
-          className="rounded-lg border border-ocean-200 px-2 py-1.5 disabled:opacity-60"
+          className="rounded-lg border border-ocean-200 px-2 py-2 text-base disabled:opacity-60 sm:py-1.5 sm:text-sm"
         >
           {pageSizeOptions.map((size) => (
             <option key={size} value={size}>
@@ -53,8 +53,8 @@ export function Pagination({
             type="button"
             onClick={onPrevious}
             disabled={!hasPrevious || busy}
-            aria-label="Pagina anterior"
-            className="flex items-center gap-1 rounded-lg border border-ocean-200 px-3 py-1.5 font-medium text-ocean-700 hover:bg-ocean-50 disabled:opacity-40"
+            aria-label="Página anterior"
+            className="flex items-center gap-1 rounded-lg border border-ocean-200 px-3 py-2.5 font-medium text-ocean-700 hover:bg-ocean-50 disabled:opacity-40 sm:py-1.5"
           >
             <ChevronLeft className="h-4 w-4" aria-hidden="true" />
             Anterior
@@ -63,10 +63,10 @@ export function Pagination({
             type="button"
             onClick={onNext}
             disabled={!hasNext || busy}
-            aria-label="Proxima pagina"
-            className="flex items-center gap-1 rounded-lg border border-ocean-200 px-3 py-1.5 font-medium text-ocean-700 hover:bg-ocean-50 disabled:opacity-40"
+            aria-label="Próxima página"
+            className="flex items-center gap-1 rounded-lg border border-ocean-200 px-3 py-2.5 font-medium text-ocean-700 hover:bg-ocean-50 disabled:opacity-40 sm:py-1.5"
           >
-            Proxima
+            Próxima
             <ChevronRight className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>

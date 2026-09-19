@@ -81,7 +81,7 @@ export function ReportsPage() {
         <Stat label="Reencontros realizados" value={data.reunited} />
       </div>
 
-      <div className="rounded-xl border border-ocean-100 bg-white p-6 shadow-sm">
+      <div className="rounded-xl border border-ocean-100 bg-white p-4 shadow-sm sm:p-6">
         <h2 className="mb-2 text-lg font-bold text-ocean-900">Tempo médio de atendimento</h2>
         <p className="text-3xl font-bold text-ocean-700">
           {data.avgResolutionMinutes !== null ? `${data.avgResolutionMinutes} min` : "Sem dados ainda"}
@@ -89,7 +89,7 @@ export function ReportsPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-xl border border-ocean-100 bg-white p-6 shadow-sm">
+        <div className="rounded-xl border border-ocean-100 bg-white p-4 shadow-sm sm:p-6">
           <h2 className="mb-3 text-lg font-bold text-ocean-900">Ocorrências por praia</h2>
           <ul className="space-y-1 text-sm">
             {data.incidentsByBeach.map((row) => (
@@ -102,7 +102,7 @@ export function ReportsPage() {
           </ul>
         </div>
 
-        <div className="rounded-xl border border-ocean-100 bg-white p-6 shadow-sm">
+        <div className="rounded-xl border border-ocean-100 bg-white p-4 shadow-sm sm:p-6">
           <h2 className="mb-3 text-lg font-bold text-ocean-900">Ocorrências por tenda mais próxima</h2>
           <ul className="space-y-1 text-sm">
             {data.incidentsByTent.map((row) => (
@@ -118,7 +118,7 @@ export function ReportsPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-ocean-100 bg-white p-6 shadow-sm">
+      <div className="rounded-xl border border-ocean-100 bg-white p-4 shadow-sm sm:p-6">
         <h2 className="mb-3 text-lg font-bold text-ocean-900">Horários com mais ocorrências</h2>
         <div className="flex items-end gap-1" style={{ height: 120 }}>
           {data.incidentsByHour.map((row) => (
@@ -154,7 +154,7 @@ export function ReportsPage() {
         </table>
       </div>
 
-      <div className="rounded-xl border border-ocean-100 bg-white p-6 shadow-sm">
+      <div className="rounded-xl border border-ocean-100 bg-white p-4 shadow-sm sm:p-6">
         <h2 className="mb-2 text-lg font-bold text-ocean-900">Retenção e expurgo de dados (LGPD)</h2>
         <p className="mb-3 text-sm text-ocean-600">
           Anonimiza cadastros antigos somente quando toda a família está sem atendimentos abertos ou recentes.

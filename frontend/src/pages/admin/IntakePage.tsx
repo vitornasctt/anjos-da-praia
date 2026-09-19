@@ -225,7 +225,7 @@ export function IntakePage() {
         Cadastro rápido
       </h1>
 
-      <form onSubmit={handleSubmit} className="grid gap-4 rounded-xl border border-ocean-100 bg-white p-6 shadow-sm sm:grid-cols-2">
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-4 rounded-xl border border-ocean-100 bg-white p-4 shadow-sm sm:grid-cols-2 sm:p-6">
         <Field label="Nome do responsável" value={form.responsibleName} onChange={(v) => setForm({ ...form, responsibleName: v })} required />
         <Field label="Telefone do responsável" value={form.responsiblePhone} onChange={(v) => setForm({ ...form, responsiblePhone: v })} required placeholder="(27) 99999-0000" />
         <div className="sm:col-span-2">
@@ -244,7 +244,7 @@ export function IntakePage() {
           </h2>
 
           {kids.map((kid, index) => (
-            <fieldset key={kid.key} className="grid gap-4 rounded-xl border border-ocean-100 bg-ocean-50/40 p-4 sm:grid-cols-2">
+            <fieldset key={kid.key} className="grid min-w-0 grid-cols-1 gap-4 rounded-xl border border-ocean-100 bg-ocean-50/40 p-3 sm:grid-cols-2 sm:p-4">
               <legend className="px-2 text-sm font-bold text-ocean-700">Criança {index + 1}</legend>
               <Field
                 label="Nome da criança"
@@ -288,7 +288,7 @@ export function IntakePage() {
                     capture="environment"
                     onChange={(e) => handlePhotoChange(kid.key, e)}
                     disabled={kid.processingPhoto}
-                    className="text-sm text-ocean-700 file:mr-3 file:rounded-lg file:border-0 file:bg-ocean-100 file:px-3 file:py-2 file:font-semibold file:text-ocean-700 disabled:opacity-60"
+                    className="w-full min-w-0 max-w-full text-sm text-ocean-700 sm:w-auto file:mr-3 file:rounded-lg file:border-0 file:bg-ocean-100 file:px-3 file:py-2 file:font-semibold file:text-ocean-700 disabled:opacity-60"
                   />
                   {kid.processingPhoto && (
                     <span role="status" aria-live="polite" className="flex items-center gap-1.5 text-sm text-ocean-600">
@@ -349,7 +349,7 @@ export function IntakePage() {
         </div>
       </form>
 
-      <div className="rounded-xl border border-ocean-100 bg-white p-6 shadow-sm">
+      <div className="rounded-xl border border-ocean-100 bg-white p-4 shadow-sm sm:p-6">
         <h2 className="mb-3 text-lg font-bold text-ocean-900">Buscar pulseira</h2>
         <form onSubmit={handleSearch} className="flex gap-2">
           <label htmlFor="searchNumber" className="sr-only">Número da pulseira</label>
@@ -358,12 +358,12 @@ export function IntakePage() {
             value={searchNumber}
             onChange={(e) => setSearchNumber(e.target.value)}
             placeholder="Número da pulseira"
-            className="flex-1 rounded-lg border border-ocean-200 px-3 py-2"
+            className="min-w-0 flex-1 rounded-lg border border-ocean-200 px-3 py-2"
           />
           <button
             type="submit"
             disabled={searching}
-            className="rounded-lg bg-ocean-100 px-4 py-2 font-semibold text-ocean-700 hover:bg-ocean-200"
+            className="shrink-0 rounded-lg bg-ocean-100 px-4 py-2 font-semibold text-ocean-700 hover:bg-ocean-200"
           >
             {searching ? "Buscando..." : "Buscar"}
           </button>
@@ -382,7 +382,7 @@ export function IntakePage() {
         )}
       </div>
 
-      <div className="rounded-xl border border-ocean-100 bg-white p-6 shadow-sm">
+      <div className="rounded-xl border border-ocean-100 bg-white p-4 shadow-sm sm:p-6">
         <h2 className="mb-3 text-lg font-bold text-ocean-900">Famílias cadastradas</h2>
 
         <div className="mb-4">
@@ -394,7 +394,7 @@ export function IntakePage() {
               value={familySearchInput}
               onChange={(e) => setFamilySearchInput(e.target.value)}
               placeholder="Buscar por nome do responsável"
-              className="w-full rounded-lg border border-ocean-200 py-2 pl-9 pr-8 text-sm"
+              className="w-full rounded-lg border border-ocean-200 py-2 pl-9 pr-8 text-base sm:text-sm"
             />
             {familySearchInput && (
               <button

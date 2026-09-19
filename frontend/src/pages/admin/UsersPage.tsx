@@ -16,6 +16,12 @@ interface AdminUser {
   active: boolean;
 }
 
+const ROLE_LABELS: Record<string, string> = {
+  ADMIN: "Administrador",
+  ATENDENTE: "Atendente",
+  EQUIPE_CAMPO: "Equipe de campo",
+};
+
 const emptyForm = { name: "", email: "", password: "", role: "ATENDENTE" as Role };
 const PAGE_SIZE_KEY = "usersPage.pageSize";
 
@@ -103,7 +109,7 @@ export function UsersPage() {
         Usuários da equipe
       </h1>
 
-      <form onSubmit={handleSubmit} className="grid gap-3 rounded-xl border border-ocean-100 bg-white p-6 shadow-sm sm:grid-cols-2">
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-3 rounded-xl border border-ocean-100 bg-white p-4 shadow-sm sm:grid-cols-2 sm:p-6">
         <label htmlFor="userName" className="sr-only">Nome</label>
         <input
           id="userName"
@@ -159,7 +165,7 @@ export function UsersPage() {
         </div>
       </form>
 
-      <div className="rounded-xl border border-ocean-100 bg-white p-6 shadow-sm">
+      <div className="rounded-xl border border-ocean-100 bg-white p-4 shadow-sm sm:p-6">
         <div className="mb-4 flex items-center gap-2">
           <label htmlFor="userSearch" className="sr-only">Buscar por nome ou e-mail</label>
           <div className="relative flex-1 max-w-sm">
@@ -169,7 +175,7 @@ export function UsersPage() {
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Buscar por nome ou e-mail"
-              className="w-full rounded-lg border border-ocean-200 py-2 pl-9 pr-8 text-sm"
+              className="w-full rounded-lg border border-ocean-200 py-2 pl-9 pr-8 text-base sm:text-sm"
             />
             {searchInput && (
               <button
@@ -198,7 +204,8 @@ export function UsersPage() {
             {search ? `Nenhum usuário encontrado para "${search}".` : "Nenhum usuário cadastrado ainda."}
           </p>
         ) : (
-          <table className="w-full text-sm">
+          <>
+          <table className="hidden w-full text-sm lg:table">
             <thead>
               <tr className="border-b border-ocean-100 text-left text-ocean-500">
                 <th scope="col" className="py-2">Nome</th>
@@ -213,7 +220,7 @@ export function UsersPage() {
                 <tr key={u.id} className="border-b border-ocean-50">
                   <td className="py-2">{u.name}</td>
                   <td>{u.email}</td>
-                  <td>{u.role}</td>
+                  <td>{ROLE_LABELS[u.role] ?? u.role}</td>
                   <td>{u.active ? "Ativo" : "Inativo"}</td>
                   <td>
                     <button
@@ -238,6 +245,44 @@ export function UsersPage() {
               ))}
             </tbody>
           </table>
+          <ul className="space-y-3 lg:hidden">
+            {users.map((u) => (
+              <li key={u.id} className="rounded-xl border border-ocean-100 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="min-w-0 break-words text-base font-bold text-ocean-900">{u.name}</p>
+                  <span
+                    className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                      u.active ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"
+                    }`}
+                  >
+                    {u.active ? "Ativo" : "Inativo"}
+                  </span>
+                </div>
+                <p className="mt-1 break-all text-sm text-ocean-600">{u.email}</p>
+                <p className="mt-1 text-sm text-ocean-700">Perfil: {ROLE_LABELS[u.role] ?? u.role}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    onClick={() => toggleActive(u)}
+                    disabled={togglingIds.has(u.id)}
+                    aria-label={`${u.active ? "Desativar" : "Ativar"} usuário ${u.name}`}
+                    className="rounded-lg border border-ocean-200 px-4 py-2.5 text-sm font-semibold text-ocean-700 disabled:opacity-50"
+                  >
+                    {u.active ? "Desativar" : "Ativar"}
+                  </button>
+                  {u.role !== "ADMIN" && (
+                    <button
+                      onClick={() => setDeleteTarget(u)}
+                      aria-label={`Excluir usuário ${u.name}`}
+                      className="rounded-lg border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600"
+                    >
+                      Excluir
+                    </button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+          </>
         )}
 
         {!loadingUsers && total > 0 && (

@@ -28,8 +28,8 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-ocean-800 px-4">
-      <form onSubmit={handleSubmit} className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-xl">
+    <div className="flex min-h-screen min-h-dvh items-center justify-center bg-ocean-800 px-4">
+      <form onSubmit={handleSubmit} className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl sm:p-8">
         <div className="mb-6 flex items-center justify-center gap-2">
           <img src="/icon.svg" alt="" className="h-10 w-10 rounded-lg" />
           <h1 className="text-lg font-bold text-ocean-900">Anjos da Praia</h1>

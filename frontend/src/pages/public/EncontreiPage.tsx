@@ -392,7 +392,7 @@ export function EncontreiPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-ocean-700 px-4 py-8">
+    <div className="flex min-h-screen min-h-dvh flex-col items-center justify-center bg-ocean-700 px-4 py-8">
       <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl sm:p-8">
         <div className="mb-3 flex justify-end gap-1">
           {(["pt", "en", "es"] as Lang[]).map((code) => (

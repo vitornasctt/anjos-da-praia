@@ -214,7 +214,7 @@ export function DashboardPage() {
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Buscar por número da pulseira"
-            className="w-full rounded-lg border border-ocean-200 py-2 pl-9 pr-8 text-sm"
+            className="w-full rounded-lg border border-ocean-200 py-2 pl-9 pr-8 text-base sm:text-sm"
           />
           {searchInput && (
             <button
