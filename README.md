@@ -36,7 +36,7 @@ Uma plataforma web (sem necessidade de instalar aplicativo) que digitaliza o flu
 
 MVP (entregue):
 - Login com controle de acesso por perfil (RBAC validado no backend)
-- Cadastro rápido de família + criança + pulseira (dado mínimo, LGPD)
+- Cadastro rápido de família + uma ou mais crianças (até 10, cada uma com sua pulseira) em um único envio, com endereço opcional do responsável (dado mínimo, LGPD)
 - Busca de pulseira por número
 - Página pública "Encontrei uma criança" (QR Code): número da pulseira, geolocalização com alternativa manual, criação automática de ocorrência
 - Painel com cards de status e lista de ocorrências, com destaque para novas
@@ -191,7 +191,7 @@ Base: `/api`
 | GET | `/public/wristbands/by-token/:token/check` | público | Idem, por token do QR individual |
 | GET | `/public/beaches` | público | Lista de praias (fallback sem geolocalização) |
 | POST | `/public/incidents` | público (rate limited) | Cria a ocorrência a partir do QR Code |
-| POST | `/families/intake` | ADMIN, ATENDENTE | Cadastro rápido família + criança + pulseira |
+| POST | `/families/intake` | ADMIN, ATENDENTE | Cadastro rápido: família (com endereço opcional) + 1 a 10 crianças, cada uma com sua pulseira, em uma transação (`children: [...]`) |
 | GET | `/families`, `/families/:id` | ADMIN, ATENDENTE | Listagem paginada por cursor (`cursor`, `limit`, `search`) / detalhe |
 | GET | `/wristbands/search?printedNumber=` | ADMIN, ATENDENTE | Busca pulseira |
 | GET | `/incidents` | autenticado | Lista paginada por cursor (`cursor`, `limit`, `filter`, `search` por pulseira, `includeHistory`); `open=true` devolve só as em andamento (usado pelo mapa) |
@@ -299,7 +299,7 @@ Pendências conhecidas para produção (fora do escopo do MVP do hackathon): rot
 
 ## LGPD e privacidade
 
-- **Minimização de dados**: o cadastro coleta apenas nome e telefone do responsável, primeiro nome da criança e uma observação opcional — nunca CPF, RG ou endereço.
+- **Minimização de dados**: o cadastro coleta apenas nome, telefone e endereço (opcional) do responsável, primeiro nome da criança, uma observação opcional e uma foto opcional — nunca CPF ou RG. O endereço só é exibido a usuários autenticados e é apagado junto com os demais dados pessoais (rotina de retenção e exclusão manual).
 - **Finalidade**: os dados só existem para viabilizar o reencontro durante a operação da Associação.
 - A página pública do QR Code **nunca** expõe dados pessoais de crianças ou responsáveis — apenas confirma o recebimento do alerta.
 - Dados de responsáveis só são visíveis para usuários autenticados e autorizados (equipe/atendente/admin), na tela de ocorrência.

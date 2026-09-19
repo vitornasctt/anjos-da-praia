@@ -69,6 +69,7 @@ model Family {
   id               String   @id @default(cuid())
   responsibleName  String
   responsiblePhone String
+  responsibleAddress String?
   registeredById   String?
   createdAt        DateTime @default(now())
 

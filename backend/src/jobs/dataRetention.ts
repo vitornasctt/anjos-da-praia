@@ -40,8 +40,8 @@ export async function purgeOldPersonalData(retentionDays: number) {
         data: { firstName: ANONYMIZED_LABEL, optionalIdentificationNote: null, photoUrl: null },
       });
       anonymizedChildren += children.count;
-      if (family.responsibleName !== ANONYMIZED_LABEL || family.responsiblePhone !== ANONYMIZED_LABEL) {
-        await tx.family.update({ where: { id: family.id }, data: { responsibleName: ANONYMIZED_LABEL, responsiblePhone: ANONYMIZED_LABEL } });
+      if (family.responsibleName !== ANONYMIZED_LABEL || family.responsiblePhone !== ANONYMIZED_LABEL || family.responsibleAddress) {
+        await tx.family.update({ where: { id: family.id }, data: { responsibleName: ANONYMIZED_LABEL, responsiblePhone: ANONYMIZED_LABEL, responsibleAddress: null } });
         anonymizedFamilies++;
       }
     }

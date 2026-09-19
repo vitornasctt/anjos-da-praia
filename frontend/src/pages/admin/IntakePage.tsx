@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, useId, useState } from "react";
-import { UserPlus, Search, X } from "lucide-react";
+import { UserPlus, Search, X, Plus, Trash2 } from "lucide-react";
 import { apiRequest, ApiError } from "../../services/api";
 import { useAuth } from "../../context/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
@@ -10,14 +10,38 @@ import { useCursorPage } from "../../hooks/useCursorPage";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { Family, Wristband } from "../../types";
 
-const emptyForm = {
+const MAX_CHILDREN = 10; // mesmo limite da API (MAX_CHILDREN_PER_INTAKE)
+
+const emptyGuardian = {
   responsibleName: "",
   responsiblePhone: "",
-  childFirstName: "",
-  optionalIdentificationNote: "",
-  printedNumber: "",
-  photoUrl: "",
+  responsibleAddress: "",
 };
+
+// Cada crianca tem seu proprio bloco de campos e sua propria pulseira; a
+// familia inteira e enviada em uma unica chamada.
+interface ChildDraft {
+  key: number;
+  firstName: string;
+  printedNumber: string;
+  optionalIdentificationNote: string;
+  photoUrl: string;
+  processingPhoto: boolean;
+  photoError: string | null;
+}
+
+let nextChildKey = 1;
+function newChildDraft(): ChildDraft {
+  return {
+    key: nextChildKey++,
+    firstName: "",
+    printedNumber: "",
+    optionalIdentificationNote: "",
+    photoUrl: "",
+    processingPhoto: false,
+    photoError: null,
+  };
+}
 
 const PHOTO_MAX_DIMENSION = 480;
 const PHOTO_QUALITY = 0.7;
@@ -56,12 +80,11 @@ const FAMILIES_PAGE_SIZE_KEY = "familiesPage.pageSize";
 
 export function IntakePage() {
   const { user } = useAuth();
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState(emptyGuardian);
+  const [kids, setKids] = useState<ChildDraft[]>(() => [newChildDraft()]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [photoError, setPhotoError] = useState<string | null>(null);
-  const [processingPhoto, setProcessingPhoto] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<Family | null>(null);
 
@@ -93,11 +116,40 @@ export function IntakePage() {
     e.preventDefault();
     setError(null);
     setSuccess(null);
+
+    const numbers = kids.map((k) => k.printedNumber.trim());
+    const repeated = numbers.find((n, i) => numbers.indexOf(n) !== i);
+    if (repeated) {
+      setError(`A pulseira ${repeated} foi digitada para mais de uma criança. Cada criança precisa de uma pulseira diferente.`);
+      return;
+    }
+    if (kids.some((k) => k.processingPhoto)) {
+      setError("Aguarde o processamento das fotos.");
+      return;
+    }
+
     setSaving(true);
     try {
-      await apiRequest("/families/intake", { method: "POST", body: form });
-      setSuccess(`Cadastro concluído! Pulseira #${form.printedNumber} associada a ${form.childFirstName}.`);
-      setForm(emptyForm);
+      await apiRequest("/families/intake", {
+        method: "POST",
+        body: {
+          ...form,
+          children: kids.map((k) => ({
+            firstName: k.firstName,
+            printedNumber: k.printedNumber,
+            optionalIdentificationNote: k.optionalIdentificationNote,
+            photoUrl: k.photoUrl,
+          })),
+        },
+      });
+      const summary = kids.map((k) => `#${k.printedNumber.trim()} (${k.firstName.trim()})`).join(", ");
+      setSuccess(
+        kids.length === 1
+          ? `Cadastro concluído! Pulseira ${summary} associada.`
+          : `Cadastro concluído! ${kids.length} crianças na mesma família. Pulseiras: ${summary}.`
+      );
+      setForm(emptyGuardian);
+      setKids([newChildDraft()]);
       reloadFamilies();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Não foi possível concluir o cadastro.");
@@ -106,18 +158,29 @@ export function IntakePage() {
     }
   }
 
-  async function handlePhotoChange(e: ChangeEvent<HTMLInputElement>) {
+  function updateKid(key: number, patch: Partial<ChildDraft>) {
+    setKids((list) => list.map((k) => (k.key === key ? { ...k, ...patch } : k)));
+  }
+
+  function addKid() {
+    setKids((list) => (list.length >= MAX_CHILDREN ? list : [...list, newChildDraft()]));
+  }
+
+  function removeKid(key: number) {
+    setKids((list) => (list.length <= 1 ? list : list.filter((k) => k.key !== key)));
+  }
+
+  async function handlePhotoChange(key: number, e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    setPhotoError(null);
-    setProcessingPhoto(true);
+    updateKid(key, { photoError: null, processingPhoto: true });
     try {
       const dataUrl = await resizeImageToDataUrl(file);
-      setForm((f) => ({ ...f, photoUrl: dataUrl }));
+      updateKid(key, { photoUrl: dataUrl });
     } catch {
-      setPhotoError("Não foi possível processar a foto. Tente outra imagem.");
+      updateKid(key, { photoError: "Não foi possível processar a foto. Tente outra imagem." });
     } finally {
-      setProcessingPhoto(false);
+      updateKid(key, { processingPhoto: false });
     }
   }
 
@@ -165,54 +228,111 @@ export function IntakePage() {
       <form onSubmit={handleSubmit} className="grid gap-4 rounded-xl border border-ocean-100 bg-white p-6 shadow-sm sm:grid-cols-2">
         <Field label="Nome do responsável" value={form.responsibleName} onChange={(v) => setForm({ ...form, responsibleName: v })} required />
         <Field label="Telefone do responsável" value={form.responsiblePhone} onChange={(v) => setForm({ ...form, responsiblePhone: v })} required placeholder="(27) 99999-0000" />
-        <Field label="Nome da criança" value={form.childFirstName} onChange={(v) => setForm({ ...form, childFirstName: v })} required />
-        <Field label="Número da pulseira" value={form.printedNumber} onChange={(v) => setForm({ ...form, printedNumber: v })} required />
         <div className="sm:col-span-2">
           <Field
-            label="Observação (opcional, só se necessária para identificação)"
-            value={form.optionalIdentificationNote}
-            onChange={(v) => setForm({ ...form, optionalIdentificationNote: v })}
+            label="Endereço do responsável (opcional)"
+            value={form.responsibleAddress}
+            onChange={(v) => setForm({ ...form, responsibleAddress: v })}
+            placeholder="Rua, número, bairro, cidade"
+            maxLength={200}
           />
         </div>
 
-        <div className="sm:col-span-2">
-          <label htmlFor="childPhoto" className="mb-1 block text-sm font-semibold text-ocean-900">
-            Foto da criança (opcional, ajuda a equipe a confirmar identidade)
-          </label>
-          <div className="flex items-center gap-3">
-            {form.photoUrl && (
-              <img
-                src={form.photoUrl}
-                alt="Prévia da foto da criança"
-                className="h-16 w-16 rounded-lg border border-ocean-200 object-cover"
+        <div className="sm:col-span-2 space-y-4">
+          <h2 className="text-lg font-bold text-ocean-900">
+            {kids.length === 1 ? "Criança" : `Crianças (${kids.length})`}
+          </h2>
+
+          {kids.map((kid, index) => (
+            <fieldset key={kid.key} className="grid gap-4 rounded-xl border border-ocean-100 bg-ocean-50/40 p-4 sm:grid-cols-2">
+              <legend className="px-2 text-sm font-bold text-ocean-700">Criança {index + 1}</legend>
+              <Field
+                label="Nome da criança"
+                value={kid.firstName}
+                onChange={(v) => updateKid(kid.key, { firstName: v })}
+                required
+                maxLength={80}
               />
-            )}
-            <input
-              id="childPhoto"
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={handlePhotoChange}
-              disabled={processingPhoto}
-              className="text-sm text-ocean-700 file:mr-3 file:rounded-lg file:border-0 file:bg-ocean-100 file:px-3 file:py-2 file:font-semibold file:text-ocean-700 disabled:opacity-60"
-            />
-            {processingPhoto && (
-              <span role="status" aria-live="polite" className="flex items-center gap-1.5 text-sm text-ocean-600">
-                <Spinner className="h-4 w-4" />
-                Processando foto...
-              </span>
-            )}
-            {form.photoUrl && !processingPhoto && (
-              <button
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, photoUrl: "" }))}
-                className="text-sm font-medium text-ocean-600 underline"
-              >
-                Remover
-              </button>
-            )}
-          </div>
-          {photoError && <p role="alert" className="mt-1 text-sm text-red-600">{photoError}</p>}
+              <Field
+                label="Número da pulseira"
+                value={kid.printedNumber}
+                onChange={(v) => updateKid(kid.key, { printedNumber: v })}
+                required
+                maxLength={20}
+              />
+              <div className="sm:col-span-2">
+                <Field
+                  label="Observação (opcional, só se necessária para identificação)"
+                  value={kid.optionalIdentificationNote}
+                  onChange={(v) => updateKid(kid.key, { optionalIdentificationNote: v })}
+                  maxLength={280}
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label htmlFor={`childPhoto-${kid.key}`} className="mb-1 block text-sm font-semibold text-ocean-900">
+                  Foto da criança (opcional, ajuda a equipe a confirmar identidade)
+                </label>
+                <div className="flex flex-wrap items-center gap-3">
+                  {kid.photoUrl && (
+                    <img
+                      src={kid.photoUrl}
+                      alt={`Prévia da foto da criança ${index + 1}`}
+                      className="h-16 w-16 rounded-lg border border-ocean-200 object-cover"
+                    />
+                  )}
+                  <input
+                    id={`childPhoto-${kid.key}`}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={(e) => handlePhotoChange(kid.key, e)}
+                    disabled={kid.processingPhoto}
+                    className="text-sm text-ocean-700 file:mr-3 file:rounded-lg file:border-0 file:bg-ocean-100 file:px-3 file:py-2 file:font-semibold file:text-ocean-700 disabled:opacity-60"
+                  />
+                  {kid.processingPhoto && (
+                    <span role="status" aria-live="polite" className="flex items-center gap-1.5 text-sm text-ocean-600">
+                      <Spinner className="h-4 w-4" />
+                      Processando foto...
+                    </span>
+                  )}
+                  {kid.photoUrl && !kid.processingPhoto && (
+                    <button
+                      type="button"
+                      onClick={() => updateKid(kid.key, { photoUrl: "" })}
+                      className="text-sm font-medium text-ocean-600 underline"
+                    >
+                      Remover foto
+                    </button>
+                  )}
+                </div>
+                {kid.photoError && <p role="alert" className="mt-1 text-sm text-red-600">{kid.photoError}</p>}
+              </div>
+
+              {kids.length > 1 && (
+                <div className="sm:col-span-2">
+                  <button
+                    type="button"
+                    onClick={() => removeKid(kid.key)}
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-red-600 underline"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    Remover criança {index + 1}
+                  </button>
+                </div>
+              )}
+            </fieldset>
+          ))}
+
+          <button
+            type="button"
+            onClick={addKid}
+            disabled={kids.length >= MAX_CHILDREN}
+            className="inline-flex items-center gap-2 rounded-xl border-2 border-dashed border-ocean-300 px-4 py-3 font-semibold text-ocean-700 hover:bg-ocean-50 disabled:opacity-60"
+          >
+            <Plus className="h-5 w-5" aria-hidden="true" />
+            Adicionar outra criança da mesma família
+          </button>
         </div>
 
         {error && <p role="alert" className="sm:col-span-2 text-sm font-medium text-red-600">{error}</p>}
@@ -224,7 +344,7 @@ export function IntakePage() {
             disabled={saving}
             className="w-full rounded-xl bg-ocean-600 px-6 py-4 text-lg font-bold text-white shadow-md hover:bg-ocean-700 disabled:opacity-60 sm:w-auto"
           >
-            {saving ? "Salvando..." : "Cadastrar família e pulseira"}
+            {saving ? "Salvando..." : kids.length === 1 ? "Cadastrar família e pulseira" : `Cadastrar família e ${kids.length} pulseiras`}
           </button>
         </div>
       </form>
@@ -255,6 +375,9 @@ export function IntakePage() {
             <p><strong>Criança:</strong> {searchResult.child?.firstName ?? "—"}</p>
             <p><strong>Responsável:</strong> {searchResult.child?.family?.responsibleName ?? "—"}</p>
             <p><strong>Telefone:</strong> {searchResult.child?.family?.responsiblePhone ?? "—"}</p>
+            {searchResult.child?.family?.responsibleAddress && (
+              <p><strong>Endereço:</strong> {searchResult.child.family.responsibleAddress}</p>
+            )}
           </div>
         )}
       </div>
@@ -305,6 +428,7 @@ export function IntakePage() {
               <li key={f.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
                 <span className="font-medium">{f.responsibleName}</span>
                 <span className="text-ocean-500">{f.responsiblePhone}</span>
+                {f.responsibleAddress && <span className="basis-full text-ocean-500">{f.responsibleAddress}</span>}
                 <span>
                   {f.children?.map((c) => `${c.firstName} (#${c.wristbands?.[0]?.printedNumber ?? "—"})`).join(", ")}
                 </span>
@@ -342,7 +466,7 @@ export function IntakePage() {
       <ConfirmDialog
         open={confirmTarget !== null}
         title="Apagar dados pessoais"
-        description={`Apagar os dados pessoais de "${confirmTarget?.responsibleName}" (foto, nome, telefone e dados da criança)? A ocorrência continua no histórico, só os dados de identificação somem. Isso não pode ser desfeito.`}
+        description={`Apagar os dados pessoais de "${confirmTarget?.responsibleName}" (foto, nome, telefone, endereço e dados das crianças)? A ocorrência continua no histórico, só os dados de identificação somem. Isso não pode ser desfeito.`}
         confirmLabel="Apagar dados"
         busy={deletingId === confirmTarget?.id}
         onConfirm={confirmDeletePersonalData}
@@ -358,12 +482,14 @@ function Field({
   onChange,
   required,
   placeholder,
+  maxLength,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   required?: boolean;
   placeholder?: string;
+  maxLength?: number;
 }) {
   const id = useId();
   return (
@@ -375,6 +501,7 @@ function Field({
         onChange={(e) => onChange(e.target.value)}
         required={required}
         placeholder={placeholder}
+        maxLength={maxLength}
         className="w-full rounded-lg border border-ocean-200 px-3 py-2 focus:border-ocean-500"
       />
     </div>

@@ -212,6 +212,9 @@ export function IncidentDetailPage() {
                   Responsável: {incident.wristband?.child?.family?.responsibleName ?? "—"}
                 </p>
                 <p>Telefone: {incident.wristband?.child?.family?.responsiblePhone ?? "—"}</p>
+                {incident.wristband?.child?.family?.responsibleAddress && (
+                  <p>Endereço: {incident.wristband.child.family.responsibleAddress}</p>
+                )}
               </>
             )}
           </Section>

@@ -288,7 +288,62 @@ test('transicao desatualizada retorna conflito', async () => {
 });
 test('cadastro verifica pulseira dentro da transacao e recusa vinculo existente', async () => {
   transaction({ wristband: { findUnique: async () => ({ id: 'b', status: 'ATIVA' }) } });
-  assert.equal((await request('/families/intake', { responsibleName: 'Pessoa', responsiblePhone: '27999990000', childFirstName: 'Ana', printedNumber: '4821' })).status, 409);
+  assert.equal((await request('/families/intake', { responsibleName: 'Pessoa', responsiblePhone: '27999990000', children: [{ firstName: 'Ana', printedNumber: '4821' }] })).status, 409);
+});
+test('cadastro cria varias criancas na mesma familia, cada uma com sua pulseira, e guarda o endereco', async () => {
+  const families = [], children = [], created = [], updated = [], audits = [];
+  transaction({
+    wristband: {
+      findUnique: async ({ where }) => (where.printedNumber === '4822' ? { id: 'w-4822', status: 'DISPONIVEL' } : null),
+      create: async ({ data }) => { created.push(data); return { id: 'w-' + data.printedNumber, ...data }; },
+      update: async ({ where, data }) => { updated.push({ id: where.id, ...data }); return { id: where.id, ...data }; },
+    },
+    family: { create: async ({ data }) => { families.push(data); return { id: 'f1', ...data }; } },
+    child: { create: async ({ data }) => { children.push(data); return { id: 'c' + children.length, ...data }; } },
+    auditLog: { create: async ({ data }) => { audits.push(data); } },
+  });
+  const result = await request('/families/intake', {
+    responsibleName: 'Carlos Almeida', responsiblePhone: '27999990000', responsibleAddress: '  Rua das Palmeiras, 10 - Guarapari  ',
+    children: [{ firstName: 'Lucas', printedNumber: '4821' }, { firstName: 'Ana', printedNumber: '4822', optionalIdentificationNote: 'Camisa azul' }],
+  });
+  assert.equal(result.status, 201);
+  assert.equal(families.length, 1);
+  assert.equal(families[0].responsibleAddress, 'Rua das Palmeiras, 10 - Guarapari');
+  assert.deepEqual(children.map((c) => [c.familyId, c.firstName]), [['f1', 'Lucas'], ['f1', 'Ana']]);
+  assert.deepEqual(created.map((w) => [w.printedNumber, w.childId, w.status]), [['4821', 'c1', 'ATIVA']]);
+  assert.deepEqual(updated.map((w) => [w.id, w.childId, w.status]), [['w-4822', 'c2', 'ATIVA']]);
+  assert.equal(result.body.children.length, 2);
+  assert.equal(audits.length, 3);
+});
+test('cadastro sem endereco grava nulo e nao exige o campo', async () => {
+  let family;
+  transaction({
+    wristband: { findUnique: async () => null, create: async ({ data }) => ({ id: 'w', ...data }) },
+    family: { create: async ({ data }) => { family = data; return { id: 'f', ...data }; } },
+    child: { create: async ({ data }) => ({ id: 'c', ...data }) },
+    auditLog: { create: async () => {} },
+  });
+  const result = await request('/families/intake', { responsibleName: 'Pessoa', responsiblePhone: '27999990000', responsibleAddress: '', children: [{ firstName: 'Ana', printedNumber: '1' }] });
+  assert.equal(result.status, 201);
+  assert.equal(family.responsibleAddress, null);
+});
+test('cadastro recusa pulseira repetida na mesma familia e lista de criancas vazia', async () => {
+  const base = { responsibleName: 'Pessoa', responsiblePhone: '27999990000' };
+  const repeated = await request('/families/intake', { ...base, children: [{ firstName: 'Ana', printedNumber: '7' }, { firstName: 'Bia', printedNumber: '7' }] });
+  assert.equal(repeated.status, 400);
+  assert.equal((await request('/families/intake', { ...base, children: [] })).status, 400);
+  assert.equal((await request('/families/intake', { ...base, children: Array.from({ length: 11 }, (_, i) => ({ firstName: 'C' + i, printedNumber: String(i) })) })).status, 400);
+});
+test('cadastro e tudo ou nada: pulseira ocupada no meio da lista nao cria familia nem criancas', async () => {
+  let wrote = false;
+  transaction({
+    wristband: { findUnique: async ({ where }) => (where.printedNumber === '2' ? { id: 'b', status: 'ATIVA' } : null) },
+    family: { create: async () => { wrote = true; } },
+    child: { create: async () => { wrote = true; } },
+  });
+  const result = await request('/families/intake', { responsibleName: 'Pessoa', responsiblePhone: '27999990000', children: [{ firstName: 'Ana', printedNumber: '1' }, { firstName: 'Bia', printedNumber: '2' }] });
+  assert.equal(result.status, 409);
+  assert.equal(wrote, false);
 });
 test('conflito de serializacao tenta a transacao novamente', async () => {
   let attempts = 0;
@@ -320,7 +375,7 @@ test('retencao preserva familia com outro caso aberto e expira cadastro antigo s
         { status: 'EQUIPE_A_CAMINHO', resolvedAt: null, statusHistory: [] },
       ])])]),
       family('expired', [child('c2', [band('b2', [])])]),
-    ], update: async ({ where, data }) => { updated.push(where.id); assert.equal(data.responsiblePhone, ANONYMIZED_LABEL); } },
+    ], update: async ({ where, data }) => { updated.push(where.id); assert.equal(data.responsiblePhone, ANONYMIZED_LABEL); assert.equal(data.responsibleAddress, null); } },
     wristband: { updateMany: async ({ where, data }) => { assert.deepEqual(where.childId.in, ['c2']); assert.equal(data.status, 'ENCERRADA'); } },
     child: { updateMany: async () => ({ count: 1 }) }, auditLog: { create: async () => ({}) },
   });

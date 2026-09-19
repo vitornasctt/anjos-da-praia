@@ -14,56 +14,82 @@ import { paginationQuerySchema, takeForPage, splitPage, MAX_PAGE_SIZE } from "..
 const router = Router();
 router.use(authenticate, authorize("ADMIN", "ATENDENTE"));
 
-// Cadastro rapido: familia + crianca + pulseira em uma unica chamada,
-// exatamente o fluxo de tenda descrito no briefing (item 5 e 6).
-// So coleta o minimo necessario para possibilitar o reencontro (LGPD).
+// Cadastro rapido: familia + uma ou mais criancas (cada uma com sua pulseira)
+// em uma unica chamada, exatamente o fluxo de tenda descrito no briefing
+// (item 5 e 6). So coleta o minimo necessario para possibilitar o reencontro
+// (LGPD); o endereco e opcional.
+export const MAX_CHILDREN_PER_INTAKE = 10;
+
+const intakeChildSchema = z.object({
+  firstName: z.string().trim().min(1).max(80),
+  printedNumber: z.string().trim().min(1).max(20),
+  optionalIdentificationNote: z.string().trim().max(280).optional(),
+  // Data URL (base64) opcional, ja redimensionada/comprimida no navegador
+  // antes do envio (ver IntakePage.tsx) - ajuda a equipe de campo a
+  // confirmar a identidade da crianca no momento do reencontro. O teto por
+  // foto mantem o corpo total (ate MAX_CHILDREN_PER_INTAKE fotos) abaixo do
+  // limite de 3 MB do express.json.
+  photoUrl: z.string().trim().max(250_000).optional(),
+});
+
 const intakeSchema = z.object({
   responsibleName: z.string().trim().min(2).max(120),
   responsiblePhone: z.string().trim().min(8).max(20),
-  childFirstName: z.string().trim().min(1).max(80),
-  optionalIdentificationNote: z.string().trim().max(280).optional(),
-  printedNumber: z.string().trim().min(1).max(20),
-  // Data URL (base64) opcional, ja redimensionada/comprimida no navegador
-  // antes do envio (ver IntakePage.tsx) - ajuda a equipe de campo a
-  // confirmar a identidade da crianca no momento do reencontro.
-  photoUrl: z.string().trim().max(2_000_000).optional(),
+  responsibleAddress: z.string().trim().max(200).optional(),
+  children: z.array(intakeChildSchema).min(1).max(MAX_CHILDREN_PER_INTAKE),
+}).superRefine((value, ctx) => {
+  const seen = new Set<string>();
+  value.children.forEach((child, index) => {
+    if (seen.has(child.printedNumber)) {
+      ctx.addIssue({ code: "custom", path: ["children", index, "printedNumber"], message: "Numero de pulseira repetido no cadastro." });
+    }
+    seen.add(child.printedNumber);
+  });
 });
 
 router.post("/intake", validateBody(intakeSchema), asyncHandler(async (req, res) => {
-  const { responsibleName, responsiblePhone, childFirstName, optionalIdentificationNote, printedNumber, photoUrl } = req.body;
+  const { responsibleName, responsiblePhone, responsibleAddress, children } = req.body as z.infer<typeof intakeSchema>;
 
   const result = await serializable(async (tx) => {
-    const existingWristband = await tx.wristband.findUnique({ where: { printedNumber } });
-    if (existingWristband && existingWristband.status !== "DISPONIVEL") throw new HttpError(409, "Esta pulseira ja esta associada a uma crianca.");
+    // Tudo ou nada: se qualquer pulseira ja estiver em uso, nenhuma familia
+    // nem crianca e criada.
+    const existing = new Map<string, { id: string; status: string }>();
+    for (const child of children) {
+      const wristband = await tx.wristband.findUnique({ where: { printedNumber: child.printedNumber } });
+      if (wristband && wristband.status !== "DISPONIVEL") {
+        throw new HttpError(409, `A pulseira ${child.printedNumber} ja esta associada a uma crianca.`);
+      }
+      if (wristband) existing.set(child.printedNumber, wristband);
+    }
+
     const family = await tx.family.create({
       data: {
         responsibleName,
         responsiblePhone,
+        responsibleAddress: responsibleAddress || null,
         registeredById: req.user!.id,
       },
     });
-
-    const child = await tx.child.create({
-      data: {
-        familyId: family.id,
-        firstName: childFirstName,
-        optionalIdentificationNote,
-        photoUrl,
-      },
-    });
-
-    const wristband = existingWristband
-      ? await tx.wristband.update({
-          where: { id: existingWristband.id },
-          data: { childId: child.id, status: "ATIVA" },
-        })
-      : await tx.wristband.create({
-          data: { printedNumber, childId: child.id, status: "ATIVA" },
-        });
-
     await audit(req.user!.id, "CREATE", "Family", family.id, tx);
-    await audit(req.user!.id, "CREATE", "Wristband", wristband.id, tx);
-    return { family, child, wristband };
+
+    const created = [];
+    for (const item of children) {
+      const child = await tx.child.create({
+        data: {
+          familyId: family.id,
+          firstName: item.firstName,
+          optionalIdentificationNote: item.optionalIdentificationNote,
+          photoUrl: item.photoUrl,
+        },
+      });
+      const available = existing.get(item.printedNumber);
+      const wristband = available
+        ? await tx.wristband.update({ where: { id: available.id }, data: { childId: child.id, status: "ATIVA" } })
+        : await tx.wristband.create({ data: { printedNumber: item.printedNumber, childId: child.id, status: "ATIVA" } });
+      await audit(req.user!.id, "CREATE", "Wristband", wristband.id, tx);
+      created.push({ child, wristband });
+    }
+    return { family, children: created };
   });
 
   res.status(201).json(result);
@@ -132,7 +158,7 @@ router.delete("/:id/personal-data", authorize("ADMIN"), asyncHandler(async (req,
     });
     await tx.family.update({
       where: { id: family.id },
-      data: { responsibleName: ANONYMIZED_LABEL, responsiblePhone: ANONYMIZED_LABEL },
+      data: { responsibleName: ANONYMIZED_LABEL, responsiblePhone: ANONYMIZED_LABEL, responsibleAddress: null },
     });
     await audit(req.user!.id, "ANONYMIZE_MANUAL", "Family", family.id, tx);
     return { ok: true };

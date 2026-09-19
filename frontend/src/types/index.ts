@@ -60,6 +60,7 @@ export interface Family {
   id: string;
   responsibleName: string;
   responsiblePhone: string;
+  responsibleAddress?: string | null;
   createdAt: string;
   children?: Child[];
 }
