@@ -32,15 +32,6 @@ router.get("/wristbands/:printedNumber/check", asyncHandler(async (req, res) => 
   res.json({ exists: Boolean(wristband && wristband.status === "ATIVA") });
 }));
 
-// Suporte ao QR Code individual por pulseira (diferencial futuro, item 6):
-// o token publico (publicIdentifier) nunca expõe o ID sequencial interno.
-router.get("/wristbands/by-token/:token/check", asyncHandler(async (req, res) => {
-  const wristband = await prisma.wristband.findUnique({
-    where: { publicIdentifier: req.params.token.trim() },
-  });
-  res.json({ exists: Boolean(wristband && wristband.status === "ATIVA") });
-}));
-
 // Status ao vivo para quem enviou o alerta acompanhar, sem expor
 // localizacao nem dados pessoais - so o status. O id da ocorrencia
 // funciona como capacidade de acesso (nao e enumeravel, e um cuid).
@@ -62,25 +53,21 @@ router.get("/beaches", asyncHandler(async (_req, res) => {
 
 export const createIncidentSchema = z
   .object({
-    printedNumber: z.string().trim().min(1).max(20).optional(),
-    wristbandToken: z.string().trim().min(1).max(128).optional(),
+    printedNumber: z.string().trim().min(1).max(20),
     latitude: z.number().min(-90).max(90).optional(),
     longitude: z.number().min(-180).max(180).optional(),
     locationAccuracy: z.number().nonnegative().optional(),
     beachId: z.string().optional(),
     referencePoint: z.string().trim().max(200).optional(),
   })
-  .refine((data) => data.printedNumber || data.wristbandToken, {
-    message: "Informe o numero da pulseira.",
-  })
   .refine((data) => (data.latitude == null) === (data.longitude == null), { message: "Informe latitude e longitude juntas." })
   .refine((data) => data.latitude != null || Boolean(data.beachId || data.referencePoint), { message: "Informe a localizacao, a praia ou um ponto de referencia." });
 
 router.post("/incidents", publicLimiter, validateBody(createIncidentSchema), asyncHandler(async (req, res) => {
-  const { printedNumber, wristbandToken, latitude, longitude, locationAccuracy, beachId, referencePoint } = req.body;
+  const { printedNumber, latitude, longitude, locationAccuracy, beachId, referencePoint } = req.body;
   const result = await serializable(async (tx) => {
     const wristband = await tx.wristband.findUnique({
-      where: wristbandToken ? { publicIdentifier: wristbandToken } : { printedNumber },
+      where: { printedNumber },
       include: { child: { include: { family: true } } },
     });
     if (!wristband || wristband.status !== "ATIVA" || !wristband.childId) throw new HttpError(404, "Numero de pulseira nao encontrado.");

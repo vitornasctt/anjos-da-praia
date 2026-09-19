@@ -1,196 +1,123 @@
-import { FormEvent, useState } from "react";
+import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { QrCode } from "lucide-react";
+import { Printer, QrCode } from "lucide-react";
 
-const PUBLIC_BASE_URL = `${window.location.origin}/encontrei`;
-const MAX_BATCH_SIZE = 9999;
+// Um unico QR Code para tudo: o mesmo vai nos cartazes, nas tendas e nas
+// pulseiras. Ele so leva a pagina publica; quem achou a crianca digita o
+// numero impresso na pulseira. Por isso nunca precisa ser gerado de novo.
+const PUBLIC_URL = `${window.location.origin}/encontrei`;
+const LABELS_PER_SHEET = 24; // folha A4: 3 colunas x 8 linhas
 
-function buildEncontreiUrl(printedNumber: string): string {
-  const url = new URL(PUBLIC_BASE_URL);
-  url.searchParams.set("numero", printedNumber);
-  return url.toString();
-}
+type Sheet = "cartaz" | "etiquetas";
 
-function parseRange(start: string, end: string): string[] | null {
-  const startNum = Number(start);
-  const endNum = Number(end);
-  if (!Number.isInteger(startNum) || !Number.isInteger(endNum) || startNum < 0 || endNum < startNum) return null;
-  if (endNum - startNum + 1 > MAX_BATCH_SIZE) return null;
-  const width = start.trim().length;
-  const numbers: string[] = [];
-  for (let n = startNum; n <= endNum; n++) {
-    numbers.push(String(n).padStart(width, "0"));
-  }
-  return numbers;
-}
-
-function parseManualList(raw: string): string[] {
-  const numbers = raw
-    .split(/[\n,;]+/)
-    .map((n) => n.trim())
-    .filter(Boolean);
-  return Array.from(new Set(numbers)).slice(0, MAX_BATCH_SIZE);
-}
-
-// Cada pulseira tem um QR Code proprio, com o numero impresso ja
-// preenchido no link (?numero=), levando direto para a etapa de
-// localizacao no /encontrei - sem precisar digitar nem cadastrar a
-// pulseira antes de imprimir o QR.
 export function QrCodePage() {
-  const [batchMode, setBatchMode] = useState<"range" | "list">("range");
-  const [rangeStart, setRangeStart] = useState("");
-  const [rangeEnd, setRangeEnd] = useState("");
-  const [manualList, setManualList] = useState("");
-  const [batchNumbers, setBatchNumbers] = useState<string[]>([]);
-  const [batchError, setBatchError] = useState<string | null>(null);
-
-  function handleGenerateBatch(e: FormEvent) {
-    e.preventDefault();
-    setBatchError(null);
-    setBatchNumbers([]);
-
-    if (batchMode === "range") {
-      const numbers = parseRange(rangeStart, rangeEnd);
-      if (!numbers) {
-        setBatchError(`Intervalo inválido. Use números inteiros, do menor para o maior (máx. ${MAX_BATCH_SIZE} por lote).`);
-        return;
-      }
-      setBatchNumbers(numbers);
-    } else {
-      const numbers = parseManualList(manualList);
-      if (numbers.length === 0) {
-        setBatchError("Informe ao menos um número de pulseira.");
-        return;
-      }
-      setBatchNumbers(numbers);
-    }
-  }
+  const [sheet, setSheet] = useState<Sheet>("cartaz");
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <h1 className="no-print flex items-center gap-2 text-2xl font-bold text-ocean-900">
         <QrCode className="h-6 w-6 text-ocean-600" aria-hidden="true" />
-        QR Code das pulseiras
+        QR Code para imprimir
       </h1>
 
-      <div className="no-print rounded-xl border border-ocean-100 bg-white p-6 text-center shadow-sm">
-        <h2 className="mb-3 text-lg font-bold text-ocean-900">QR Code genérico</h2>
-        <p className="mb-4 text-sm text-ocean-600">
-          Alternativa sem número pré-preenchido: a pessoa é levada à página pública e informa
-          manualmente o número impresso na pulseira.
-        </p>
-        <div className="flex justify-center">
-          <QRCodeSVG value={PUBLIC_BASE_URL} size={180} />
-        </div>
-        <p className="mt-3 break-all text-xs text-ocean-500">{PUBLIC_BASE_URL}</p>
-      </div>
-
       <div className="no-print rounded-xl border border-ocean-100 bg-white p-6 shadow-sm">
-        <h2 className="mb-3 text-lg font-bold text-ocean-900">Impressão em lote</h2>
-        <p className="mb-4 text-sm text-ocean-600">
-          Gere um ou vários QR Codes de uma vez para imprimir antes do evento — não é preciso
-          cadastrar a pulseira antes, o número só precisa estar impresso na pulseira física.
+        <p className="text-ocean-800">
+          Existe <strong>um único QR Code</strong>, igual para todas as pulseiras. Imprima uma vez
+          e use em cartazes, tendas e nas pulseiras: quem achar a criança escaneia e digita o
+          número que está na pulseira.
+        </p>
+        <p className="mt-3 text-sm text-ocean-600">
+          Antes de imprimir, confira se este é o endereço oficial do site:{" "}
+          <strong className="break-all text-ocean-900">{PUBLIC_URL}</strong>
         </p>
 
-        <div className="mb-4 flex gap-2 text-sm">
+        <div className="mt-5 flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => setBatchMode("range")}
-            aria-pressed={batchMode === "range"}
-            className={`rounded-lg px-3 py-1.5 font-medium ${
-              batchMode === "range" ? "bg-ocean-600 text-white" : "bg-ocean-50 text-ocean-700"
+            onClick={() => setSheet("cartaz")}
+            aria-pressed={sheet === "cartaz"}
+            className={`rounded-xl px-5 py-3 text-base font-semibold ${
+              sheet === "cartaz" ? "bg-ocean-600 text-white" : "bg-ocean-50 text-ocean-700 hover:bg-ocean-100"
             }`}
           >
-            Intervalo numérico
+            Cartaz (uma página)
           </button>
           <button
             type="button"
-            onClick={() => setBatchMode("list")}
-            aria-pressed={batchMode === "list"}
-            className={`rounded-lg px-3 py-1.5 font-medium ${
-              batchMode === "list" ? "bg-ocean-600 text-white" : "bg-ocean-50 text-ocean-700"
+            onClick={() => setSheet("etiquetas")}
+            aria-pressed={sheet === "etiquetas"}
+            className={`rounded-xl px-5 py-3 text-base font-semibold ${
+              sheet === "etiquetas" ? "bg-ocean-600 text-white" : "bg-ocean-50 text-ocean-700 hover:bg-ocean-100"
             }`}
           >
-            Lista manual
+            Etiquetas para pulseira ({LABELS_PER_SHEET} por folha)
           </button>
         </div>
 
-        <form onSubmit={handleGenerateBatch} className="space-y-3">
-          {batchMode === "range" ? (
-            <div className="flex flex-wrap items-end gap-3">
-              <label className="text-sm text-ocean-700">
-                De
-                <input
-                  value={rangeStart}
-                  onChange={(e) => setRangeStart(e.target.value)}
-                  placeholder="0001"
-                  className="mt-1 block w-28 rounded-lg border border-ocean-200 px-3 py-2"
-                />
-              </label>
-              <label className="text-sm text-ocean-700">
-                Até
-                <input
-                  value={rangeEnd}
-                  onChange={(e) => setRangeEnd(e.target.value)}
-                  placeholder="9999"
-                  className="mt-1 block w-28 rounded-lg border border-ocean-200 px-3 py-2"
-                />
-              </label>
-              <button
-                type="submit"
-                className="rounded-lg bg-ocean-600 px-4 py-2 font-semibold text-white hover:bg-ocean-700"
-              >
-                Gerar
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <textarea
-                value={manualList}
-                onChange={(e) => setManualList(e.target.value)}
-                placeholder={"Um número por linha, ou separados por vírgula\nEx: 4821, 4822, 4823"}
-                rows={4}
-                className="w-full rounded-lg border border-ocean-200 px-3 py-2"
-              />
-              <button
-                type="submit"
-                className="rounded-lg bg-ocean-600 px-4 py-2 font-semibold text-white hover:bg-ocean-700"
-              >
-                Gerar
-              </button>
-            </div>
-          )}
-        </form>
-
-        {batchError && <p role="alert" className="mt-3 text-sm text-red-600">{batchError}</p>}
-
-        {batchNumbers.length > 0 && (
-          <div role="status" aria-live="polite" className="mt-4 flex items-center justify-between rounded-lg bg-ocean-50 px-4 py-3 text-sm text-ocean-700">
-            <span>{batchNumbers.length} QR Code(s) gerado(s).</span>
-            <button
-              type="button"
-              onClick={() => window.print()}
-              className="rounded-lg bg-ocean-600 px-4 py-2 font-semibold text-white hover:bg-ocean-700"
-            >
-              Imprimir
-            </button>
-          </div>
-        )}
+        <button
+          type="button"
+          onClick={() => window.print()}
+          className="mt-4 inline-flex items-center gap-2 rounded-xl bg-red-600 px-6 py-4 text-lg font-bold text-white shadow-md hover:bg-red-700"
+        >
+          <Printer className="h-5 w-5" aria-hidden="true" />
+          {sheet === "cartaz" ? "Imprimir cartaz" : "Imprimir folha de etiquetas"}
+        </button>
       </div>
 
-      {batchNumbers.length > 0 && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 print:grid-cols-4">
-          {batchNumbers.map((number) => (
-            <div
-              key={number}
-              className="flex flex-col items-center gap-2 rounded-lg border border-ocean-100 p-3 text-center break-inside-avoid"
-            >
-              <QRCodeSVG value={buildEncontreiUrl(number)} size={120} />
-              <span className="font-mono text-sm font-bold text-ocean-900">#{number}</span>
-            </div>
-          ))}
+      {sheet === "cartaz" ? <Poster /> : <LabelSheet />}
+    </div>
+  );
+}
+
+// Cartaz A4: leitura de longe, letras grandes, tres passos.
+function Poster() {
+  return (
+    <div className="mx-auto flex max-w-2xl flex-col items-center gap-6 rounded-2xl border-4 border-ocean-600 bg-white p-8 text-center break-inside-avoid">
+      <div>
+        <h2 className="text-4xl font-extrabold text-ocean-900">Achou uma criança perdida?</h2>
+        <p className="mt-1 text-base text-ocean-600">Found a lost child? · ¿Encontró a un niño perdido?</p>
+      </div>
+
+      <QRCodeSVG value={PUBLIC_URL} size={280} level="Q" />
+
+      <ol className="w-full space-y-3 text-left text-2xl font-bold text-ocean-900">
+        <li className="flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ocean-600 text-white">1</span>
+          Aponte a câmera do celular para o QR Code
+        </li>
+        <li className="flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ocean-600 text-white">2</span>
+          Digite o número que está na pulseira da criança
+        </li>
+        <li className="flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ocean-600 text-white">3</span>
+          Toque em ENVIAR ALERTA e fique com a criança
+        </li>
+      </ol>
+
+      <p className="text-sm text-ocean-600">Anjos da Praia · nossa equipe vai até você</p>
+    </div>
+  );
+}
+
+// Folha de etiquetas adesivas, todas iguais, para colar nas pulseiras.
+function LabelSheet() {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 print:grid-cols-3">
+      {Array.from({ length: LABELS_PER_SHEET }, (_, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-2 rounded-lg border border-ocean-200 bg-white p-2 break-inside-avoid"
+        >
+          <QRCodeSVG value={PUBLIC_URL} size={84} level="Q" />
+          <p className="text-xs font-bold leading-tight text-ocean-900">
+            Achou uma criança?
+            <span className="mt-1 block font-medium text-ocean-700">
+              Escaneie e digite o número da pulseira.
+            </span>
+          </p>
         </div>
-      )}
+      ))}
     </div>
   );
 }

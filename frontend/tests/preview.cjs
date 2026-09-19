@@ -12,11 +12,10 @@ let incident = { id: 'fixture-incident', status: 'CRIANCA_LOCALIZADA', createdAt
 let lastAlert = null;
 app.get('/api/auth/me', (_req, res) => res.json(user));
 app.post('/api/auth/logout', (_req, res) => res.json({ ok: true }));
-app.get('/api/public/wristbands/by-token/:token/check', (req, res) => res.json({ exists: req.params.token === 'valid-token' }));
 app.get('/api/public/wristbands/:number/check', (req, res) => res.json({ exists: req.params.number === '4821' }));
 app.get('/api/public/beaches', (_req, res) => res.json(beaches));
 app.post('/api/public/incidents', (req, res) => {
-  if (req.body.printedNumber !== '4821' && req.body.wristbandToken !== 'valid-token') return res.status(404).json({ error: 'Pulseira invalida.' });
+  if (req.body.printedNumber !== '4821') return res.status(404).json({ error: 'Pulseira invalida.' });
   lastAlert = req.body;
   res.status(201).json({ id: incident.id, status: incident.status });
 });

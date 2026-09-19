@@ -1,10 +1,9 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { apiRequest, ApiError } from "../../services/api";
 import { STATUS_META } from "../../components/StatusBadge";
 import { Beach, IncidentStatus } from "../../types";
 
-type Step = "verificando_token" | "numero" | "localizacao" | "fallback" | "confirmado";
+type Step = "numero" | "localizacao" | "fallback" | "confirmado";
 type Lang = "pt" | "en" | "es";
 
 const STATUS_POLL_INTERVAL_MS = 15000;
@@ -231,28 +230,19 @@ function detectDefaultLang(): Lang {
   return "pt";
 }
 
-// Fluxo publico acessado pelo QR Code da pulseira. Prioridade absoluta:
-// o menor numero de decisoes possivel ate o alerta ser enviado (item 3 e 7
-// do briefing). Nada de menus, popups ou mensagens institucionais aqui.
+// Fluxo publico acessado pelo QR Code generico (o mesmo em todos os cartazes
+// e pulseiras): a pessoa digita o numero impresso na pulseira, compartilha a
+// localizacao e envia o alerta. Prioridade absoluta: o menor numero de
+// decisoes possivel (item 3 e 7 do briefing). Nada de menus, popups ou
+// mensagens institucionais aqui.
 export function EncontreiPage() {
-  const [params] = useSearchParams();
-  // QR Code individual (opcional): o link pode trazer um token publico
-  // opaco (?pulseira=<publicIdentifier>) que nunca revela o ID interno.
-  // Quando presente, pulamos direto para a etapa de localizacao.
-  const wristbandToken = params.get("pulseira");
-  // QR Code individual por numero impresso (?numero=<printedNumber>): usado
-  // pela impressao em lote no painel, que gera o link antes mesmo da
-  // pulseira existir no banco - por isso valida a existencia aqui, nao no
-  // momento da geracao do QR.
-  const printedNumberParam = params.get("numero");
   const [lang, setLang] = useState<Lang>(detectDefaultLang);
   const t = COPY[lang];
-  const [validatedToken, setValidatedToken] = useState<string | null>(null);
   const requestInFlight = useRef(false);
   const locationInFlight = useRef(false);
   const [locating, setLocating] = useState(false);
   const [statusError, setStatusError] = useState(false);
-  const [step, setStep] = useState<Step>(wristbandToken || printedNumberParam ? "verificando_token" : "numero");
+  const [step, setStep] = useState<Step>("numero");
   const [printedNumber, setPrintedNumber] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -273,38 +263,6 @@ export function EncontreiPage() {
     }
   }, [lang]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setValidatedToken(null);
-
-    if (wristbandToken) {
-      setStep("verificando_token");
-      apiRequest<{ exists: boolean }>(
-        `/public/wristbands/by-token/${encodeURIComponent(wristbandToken)}/check`
-      ).then((result) => {
-        if (cancelled) return;
-        setValidatedToken(result.exists ? wristbandToken : null);
-        setStep(result.exists ? "localizacao" : "numero");
-      }).catch(() => { if (!cancelled) setStep("numero"); });
-      return () => { cancelled = true; };
-    }
-
-    if (printedNumberParam) {
-      setPrintedNumber(printedNumberParam);
-      setStep("verificando_token");
-      apiRequest<{ exists: boolean }>(
-        `/public/wristbands/${encodeURIComponent(printedNumberParam.trim())}/check`
-      ).then((result) => {
-        if (cancelled) return;
-        setStep(result.exists ? "localizacao" : "numero");
-      }).catch(() => { if (!cancelled) setStep("numero"); });
-      return () => { cancelled = true; };
-    }
-
-    setStep("numero");
-    return () => { cancelled = true; };
-  }, [wristbandToken, printedNumberParam]);
-
   async function handleNumberSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -321,7 +279,6 @@ export function EncontreiPage() {
         setError(t.numeroNotFound);
         return;
       }
-      setValidatedToken(null);
       setStep("localizacao");
     } catch {
       setError(t.networkError);
@@ -344,9 +301,7 @@ export function EncontreiPage() {
     try {
       const result = await apiRequest<{ id: string; status: IncidentStatus }>("/public/incidents", {
         method: "POST",
-        body: validatedToken
-          ? { wristbandToken: validatedToken, ...payload }
-          : { printedNumber: printedNumber.trim(), ...payload },
+        body: { printedNumber: printedNumber.trim(), ...payload },
       });
       setIncidentId(result.id);
       setLiveStatus(result.status);
@@ -459,10 +414,6 @@ export function EncontreiPage() {
           <img src="/icon.svg" alt="" className="h-10 w-10 rounded-lg" />
           <h1 className="text-xl font-bold text-ocean-900">{t.headerTitle}</h1>
         </div>
-
-        {step === "verificando_token" && (
-          <p role="status" aria-live="polite" className="text-center text-ocean-700">{t.loading}</p>
-        )}
 
         {step === "numero" && (
           <form onSubmit={handleNumberSubmit} className="space-y-4">

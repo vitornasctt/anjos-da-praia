@@ -177,6 +177,9 @@ test('coordenadas aceitam zero e exigem latitude e longitude juntas', () => {
   assert.equal(createIncidentSchema.safeParse({ printedNumber: '4821', longitude: -40, referencePoint: 'Posto' }).success, false);
   assert.equal(createIncidentSchema.safeParse({ printedNumber: '4821' }).success, false);
   assert.equal(createIncidentSchema.safeParse({ printedNumber: '4821', referencePoint: 'Posto 3' }).success, true);
+  // O QR e generico: sem numero de pulseira nao ha alerta, e o token de QR individual nao e mais aceito.
+  assert.equal(createIncidentSchema.safeParse({ referencePoint: 'Posto 3' }).success, false);
+  assert.equal(createIncidentSchema.safeParse({ wristbandToken: 'abc', referencePoint: 'Posto 3' }).success, false);
 });
 test('reenvio reutiliza atendimento aberto mesmo apos dois minutos', async () => {
   transaction({

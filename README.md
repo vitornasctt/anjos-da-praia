@@ -45,7 +45,7 @@ MVP (entregue):
 
 Diferenciais incluídos:
 - Mapa de ocorrências e tendas com Leaflet/OpenStreetMap (uso restrito à equipe)
-- Suporte a QR Code individual por pulseira via token público opaco, sem expor IDs internos
+- QR Code único e genérico (o mesmo em todos os cartazes e pulseiras), com impressão de cartaz A4 e de folha de etiquetas adesivas para as pulseiras: quem acha a criança escaneia e digita o número impresso na pulseira
 - Identificação automática da tenda ativa mais próxima de cada ocorrência (haversine)
 - Notificações em tempo real no painel via WebSocket (com polling como rede de segurança)
 - Relatórios (famílias, crianças, ocorrências por praia/tenda/horário, tempo médio de atendimento)
@@ -140,7 +140,7 @@ erDiagram
     USER ||--o{ INCIDENT_STATUS_HISTORY : altera
 ```
 
-Índices relevantes: `wristbands.printedNumber` (único, busca rápida por pulseira), `wristbands.publicIdentifier` (token opaco usado no QR individual — nunca o ID sequencial interno).
+Índices relevantes: `wristbands.printedNumber` (único, busca rápida por pulseira). A coluna `wristbands.publicIdentifier` continua no banco, mas não é mais usada: o QR Code é único e genérico, sem token por pulseira.
 
 Os campos de perfil e status são strings por compatibilidade com a versão inicial do MVP. Os valores aceitos são definidos em `backend/src/constants/enums.ts` e validados na API.
 
@@ -188,7 +188,6 @@ Base: `/api`
 | POST | `/auth/logout` | sessão via cookie / CSRF | Encerra a sessão (limpa os cookies no servidor) |
 | GET | `/auth/me` | autenticado | Usuário logado |
 | GET | `/public/wristbands/:printedNumber/check` | público | Verifica se a pulseira existe |
-| GET | `/public/wristbands/by-token/:token/check` | público | Idem, por token do QR individual |
 | GET | `/public/beaches` | público | Lista de praias (fallback sem geolocalização) |
 | POST | `/public/incidents` | público (rate limited) | Cria a ocorrência a partir do QR Code |
 | POST | `/families/intake` | ADMIN, ATENDENTE | Cadastro rápido: família (com endereço opcional) + 1 a 10 crianças, cada uma com sua pulseira, em uma transação (`children: [...]`) |
@@ -273,7 +272,7 @@ O seed também cria a praia "Praia de Camburi", uma tenda, uma equipe ("Equipe A
 ## Roteiro de demonstração
 
 1. Login como atendente → **Cadastro** → preencher responsável fictício (ex.: Carlos Almeida, (27) 99999-0000), criança (Lucas), pulseira `4821`.
-2. Em outro dispositivo/aba, abrir `/encontrei` (ou escanear o QR gerado em **QR Code**, como admin).
+2. Em outro dispositivo/aba, abrir `/encontrei` (ou escanear o QR do cartaz gerado em **QR Code**, como admin).
 3. Informar `4821` → autorizar localização → **ENVIAR ALERTA**.
 4. Voltar ao **Painel**: a ocorrência aparece imediatamente com destaque "NOVA".
 5. Abrir a ocorrência e avançar: Equipe a caminho → Criança recebida → Responsáveis localizados → Reencontro realizado.
@@ -303,7 +302,7 @@ Pendências conhecidas para produção (fora do escopo do MVP do hackathon): rot
 - **Finalidade**: os dados só existem para viabilizar o reencontro durante a operação da Associação.
 - A página pública do QR Code **nunca** expõe dados pessoais de crianças ou responsáveis — apenas confirma o recebimento do alerta.
 - Dados de responsáveis só são visíveis para usuários autenticados e autorizados (equipe/atendente/admin), na tela de ocorrência.
-- QR Code (genérico ou individual) nunca expõe o ID sequencial interno do banco — o identificador público (`publicIdentifier`) é um token opaco.
+- O QR Code é único e genérico: ele só leva à página pública e não carrega nenhum identificador de criança, pulseira ou do banco.
 - Dados de demonstração neste repositório são **fictícios**.
 - **Retenção automatizada**: considera cadastros antigos de toda a família e preserva seus dados enquanto houver criança/pulseira recente ou atendimento aberto/encerrado recentemente. Cadastros antigos sem ocorrências também são anonimizados. Pulseiras relacionadas são encerradas para impedir novos alertas sem dados de contato. Cancelamentos legados usam a data da transição no histórico; sem evidência de encerramento, os dados são preservados. A rotina roda às 03h de Brasília (06h UTC na Vercel) e também pode ser acionada em **Relatórios**.
 
@@ -322,7 +321,6 @@ Pendências conhecidas para produção (fora do escopo do MVP do hackathon): rot
 2. Fila de envio offline no fluxo público (sincroniza o alerta assim que a conexão voltar)
 3. Rotação de refresh token e MFA para administradores
 4. Histórico por edição do evento (hoje as estatísticas não distinguem edições/datas de operação)
-5. QR Code individual por pulseira como padrão de impressão (arquitetura já suporta, via token `publicIdentifier`)
 
 ## Publicação e continuidade
 
