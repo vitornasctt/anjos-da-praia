@@ -34,6 +34,10 @@ export function Layout() {
 
   const items = NAV_ITEMS.filter((item) => item.roles.includes(user.role));
 
+  // Nao repete o perfil quando o nome ja o traz (ex.: "Administrador Anjos da Praia").
+  const roleLabel = ROLE_LABEL[user.role];
+  const userLabel = user.name.toLowerCase().includes(roleLabel.toLowerCase()) ? user.name : `${user.name} · ${roleLabel}`;
+
   return (
     <div className="min-h-screen min-h-dvh bg-sand-50">
       <a
@@ -43,16 +47,17 @@ export function Layout() {
         Pular para o conteúdo
       </a>
       <header className="no-print border-b border-ocean-100 bg-white">
-        {/* Celular: logo + Sair na primeira linha e o menu numa faixa que rola na horizontal
-            (sem quebrar em varias linhas). Desktop: tudo em uma linha so. */}
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
+        {/* Ate telas medias: logo + usuario/Sair na primeira linha e o menu numa faixa propria
+            que rola na horizontal. Telas largas (xl+): tudo em UMA linha so, e o menu nunca
+            quebra. O nome do usuario so aparece quando sobra espaco (2xl). */}
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 2xl:max-w-7xl">
           <div className="flex min-w-0 items-center gap-2">
             <img src="/icon.svg" alt="" className="h-7 w-7 shrink-0 rounded" />
             <span className="whitespace-nowrap font-bold text-ocean-800">Anjos da Praia</span>
           </div>
-          <div className="order-2 flex items-center gap-3 text-sm md:order-3">
-            <span className="hidden text-ocean-700 2xl:inline">
-              {user.name} · {ROLE_LABEL[user.role]}
+          <div className="order-2 flex items-center gap-3 text-sm xl:order-3">
+            <span className="hidden whitespace-nowrap text-ocean-700 sm:inline xl:hidden 2xl:inline">
+              {userLabel}
             </span>
             <button
               onClick={handleLogout}
@@ -65,15 +70,15 @@ export function Layout() {
           <nav
             ref={navRef}
             aria-label="Navegação principal"
-            className="-mx-4 order-3 w-[calc(100%+2rem)] overflow-x-auto px-4 pb-1 md:order-2 md:mx-0 md:w-auto md:min-w-0 md:flex-1 md:overflow-visible md:px-0 md:pb-0"
+            className="-mx-4 order-3 w-[calc(100%+2rem)] overflow-x-auto px-4 pb-1 xl:order-2 xl:mx-0 xl:w-auto xl:min-w-0 xl:flex-1 xl:overflow-visible xl:px-0 xl:pb-0"
           >
-            <div className="flex w-max gap-1 text-sm md:w-auto md:flex-wrap">
+            <div className="flex w-max gap-1 text-sm xl:w-auto">
               {items.map((item) => (
                 <NavLink
                   key={item.to}
                   to={item.to}
                   className={({ isActive }) =>
-                    `flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2.5 font-medium transition md:py-2 ${
+                    `flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2.5 font-medium transition xl:py-2 ${
                       isActive ? "bg-ocean-600 text-white" : "text-ocean-700 hover:bg-ocean-50"
                     }`
                   }
