@@ -267,7 +267,10 @@ export function IntakePage() {
               <Field
                 label="Número da pulseira"
                 value={kid.printedNumber}
-                onChange={(v) => updateKid(kid.key, { printedNumber: v })}
+                // So numeros (digitados ou colados) e sem a lista de sugestoes do navegador.
+                onChange={(v) => updateKid(kid.key, { printedNumber: v.replace(/\D/g, "") })}
+                numeric
+                autoComplete="off"
                 required
                 maxLength={20}
               />
@@ -544,6 +547,8 @@ function Field({
   required,
   placeholder,
   maxLength,
+  numeric,
+  autoComplete,
 }: {
   label: string;
   value: string;
@@ -551,6 +556,8 @@ function Field({
   required?: boolean;
   placeholder?: string;
   maxLength?: number;
+  numeric?: boolean;
+  autoComplete?: string;
 }) {
   const id = useId();
   return (
@@ -563,6 +570,9 @@ function Field({
         required={required}
         placeholder={placeholder}
         maxLength={maxLength}
+        autoComplete={autoComplete}
+        inputMode={numeric ? "numeric" : undefined}
+        pattern={numeric ? "[0-9]*" : undefined}
         className="w-full rounded-lg border border-ocean-200 px-3 py-2 focus:border-ocean-500"
       />
     </div>

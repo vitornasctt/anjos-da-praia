@@ -22,7 +22,8 @@ export const MAX_CHILDREN_PER_INTAKE = 10;
 
 const intakeChildSchema = z.object({
   firstName: z.string().trim().min(1).max(80),
-  printedNumber: z.string().trim().min(1).max(20),
+  // Numero impresso na pulseira: so digitos (mantem zeros a esquerda, ex.: "0004").
+  printedNumber: z.string().trim().min(1).max(20).regex(/^\d+$/, "O numero da pulseira deve ter apenas numeros."),
   optionalIdentificationNote: z.string().trim().max(280).optional(),
   // Data URL (base64) opcional, ja redimensionada/comprimida no navegador
   // antes do envio (ver IntakePage.tsx) - ajuda a equipe de campo a

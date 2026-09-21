@@ -491,6 +491,22 @@ test('cadastro recusa pulseira repetida na mesma familia e lista de criancas vaz
   assert.equal((await request('/families/intake', { ...base, children: [] })).status, 400);
   assert.equal((await request('/families/intake', { ...base, children: Array.from({ length: 11 }, (_, i) => ({ firstName: 'C' + i, printedNumber: String(i) })) })).status, 400);
 });
+test('cadastro so aceita numero de pulseira com digitos (aceita zeros a esquerda)', async () => {
+  const body = (printedNumber) => ({ responsibleName: 'Pessoa', responsiblePhone: '27999990000', children: [{ firstName: 'Ana', printedNumber }] });
+  for (const bad of ['vito', 'leo', '12a', 'a12', '12 3', '-1', '1.5', '#4821', '４８２１x']) {
+    const result = await request('/families/intake', body(bad));
+    assert.equal(result.status, 400, `"${bad}" deveria ser recusado`);
+  }
+  let created;
+  transaction({
+    wristband: { findUnique: async () => null, create: async ({ data }) => { created = data.printedNumber; return { id: 'w', ...data }; } },
+    family: { create: async ({ data }) => ({ id: 'f', ...data }) },
+    child: { create: async ({ data }) => ({ id: 'c', ...data }) },
+    auditLog: { create: async () => ({}) },
+  });
+  assert.equal((await request('/families/intake', body('0004'))).status, 201);
+  assert.equal(created, '0004');
+});
 test('cadastro e tudo ou nada: pulseira ocupada no meio da lista nao cria familia nem criancas', async () => {
   let wrote = false;
   transaction({
