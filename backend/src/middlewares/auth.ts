@@ -9,14 +9,25 @@ import { asyncHandler } from "./asyncHandler";
 // Autenticacao obrigatoria. A validacao de permissao NUNCA depende do
 // front-end esconder um botao - toda rota sensivel passa por aqui e,
 // quando necessario, por authorize().
-export async function sessionUser(token: string) {
-  let payload: jwt.JwtPayload;
+// Verifica assinatura e validade do JWT. Todo token emitido pelo login tem
+// subject (usuario) e jti (id da sessao, usado para revogar no logout);
+// tokens sem jti nao sao aceitos porque nao poderiam ser encerrados.
+export function verifySessionToken(token: string): (jwt.JwtPayload & { sub: string; jti: string }) | null {
   try {
     const decoded = jwt.verify(token, env.jwtSecret, { algorithms: ["HS256"] });
-    if (typeof decoded === "string" || !decoded.sub) throw new Error("Invalid subject");
-    payload = decoded;
-  } catch { throw new HttpError(401, "Token invalido ou expirado."); }
-  const user = await prisma.user.findUnique({ where: { id: payload.sub! }, select: { id: true, name: true, role: true, active: true } });
+    if (typeof decoded === "string" || !decoded.sub || !decoded.jti) return null;
+    return decoded as jwt.JwtPayload & { sub: string; jti: string };
+  } catch { return null; }
+}
+
+export async function sessionUser(token: string) {
+  const payload = verifySessionToken(token);
+  if (!payload) throw new HttpError(401, "Token invalido ou expirado.");
+  const [user, revoked] = await Promise.all([
+    prisma.user.findUnique({ where: { id: payload.sub }, select: { id: true, name: true, role: true, active: true } }),
+    prisma.revokedSession.findUnique({ where: { jti: payload.jti }, select: { jti: true } }),
+  ]);
+  if (revoked) throw new HttpError(401, "Sessao encerrada. Entre novamente.");
   if (!user?.active || !ROLES.includes(user.role as Role)) throw new HttpError(401, "Sessao encerrada ou usuario inativo.");
   return { id: user.id, name: user.name, role: user.role as Role };
 }

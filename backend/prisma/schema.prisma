@@ -65,6 +65,18 @@ model Tent {
   @@map("tents")
 }
 
+// Denylist de sessoes encerradas no logout. Cada JWT carrega um id unico (jti);
+// ao sair, o jti vai para esta tabela ate o token expirar naturalmente
+// (expiresAt), e toda requisicao autenticada consulta a lista.
+model RevokedSession {
+  jti       String   @id
+  expiresAt DateTime
+  revokedAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("revoked_sessions")
+}
+
 model Family {
   id               String   @id @default(cuid())
   responsibleName  String

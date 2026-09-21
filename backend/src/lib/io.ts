@@ -43,6 +43,14 @@ export function disconnectUser(userId: string) {
   }
 }
 
+// Fecha na hora as conexoes abertas com o token de uma sessao encerrada no
+// logout (as demais conexoes da mesma conta continuam).
+export function disconnectToken(token: string) {
+  for (const socket of io?.sockets.sockets.values() ?? []) {
+    if (socket.data.token === token) socket.disconnect(true);
+  }
+}
+
 export function getIo(): Server | null {
   return io;
 }

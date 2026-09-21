@@ -10,8 +10,8 @@ process.env.NODE_ENV = 'test';
 const jwt = require('jsonwebtoken');
 const { Prisma } = require('@prisma/client');
 const forbidden = async () => { throw new Error('Database access forbidden in regression tests'); };
-const prisma = Object.fromEntries(['user', 'incident', 'tent', 'family', 'child', 'wristband', 'team', 'beach', 'auditLog', 'incidentStatusHistory'].map((model) => [model,
-  Object.fromEntries(['findUnique', 'findFirst', 'findMany', 'count', 'create', 'update', 'updateMany'].map((method) => [method, forbidden])),
+const prisma = Object.fromEntries(['user', 'incident', 'tent', 'family', 'child', 'wristband', 'team', 'beach', 'auditLog', 'incidentStatusHistory', 'revokedSession'].map((model) => [model,
+  Object.fromEntries(['findUnique', 'findFirst', 'findMany', 'count', 'create', 'update', 'updateMany', 'upsert', 'deleteMany'].map((method) => [method, forbidden])),
 ]));
 prisma.$transaction = forbidden;
 prisma.$disconnect = async () => {};
@@ -27,7 +27,7 @@ const { io: connectSocket } = require('../../frontend/node_modules/socket.io-cli
 
 let server, base, socketServer;
 const user = { id: 'operator', name: 'Operador', active: true, role: 'ADMIN' };
-const token = jwt.sign({ sub: user.id, role: 'ADMIN' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+const token = jwt.sign({ sub: user.id, role: 'ADMIN' }, process.env.JWT_SECRET, { expiresIn: '1h', jwtid: 'test-session' });
 before(async () => {
   server = http.createServer(app);
   socketServer = initIo(server);
@@ -37,6 +37,7 @@ before(async () => {
 after(async () => { await new Promise((resolve) => socketServer.close(resolve)); await prisma.$disconnect(); });
 beforeEach(() => {
   mock.method(prisma.user, 'findUnique', async () => ({ ...user }));
+  mock.method(prisma.revokedSession, 'findUnique', async () => null);
   mock.method(prisma, '$transaction', async () => { throw new Error('Unexpected transaction'); });
 });
 afterEach(() => mock.restoreAll());
@@ -134,7 +135,8 @@ test('login grava cookie de sessao HttpOnly com validade, sem dados pessoais e s
     assert.doesNotMatch(csrf, /HttpOnly/i);
     assert.match(csrf, /Secure/i);
     const payload = jwt.verify(/token=([^;]+)/.exec(session)[1], process.env.JWT_SECRET);
-    assert.deepEqual(Object.keys(payload).sort(), ['exp', 'iat', 'sub']);
+    assert.deepEqual(Object.keys(payload).sort(), ['exp', 'iat', 'jti', 'sub']);
+    assert.match(payload.jti, /^[0-9a-f-]{36}$/);
   } finally { env.nodeEnv = previous; }
 });
 test('logout expira os dois cookies com os mesmos atributos da criacao', async () => {
@@ -156,6 +158,62 @@ test('logout expira os dois cookies com os mesmos atributos da criacao', async (
     }
     assert.match(cookies.find((c) => c.startsWith('token=')), /HttpOnly/i);
   } finally { env.nodeEnv = previous; }
+});
+test('cada login recebe um jti diferente', async () => {
+  const jtis = [];
+  for (let i = 0; i < 2; i++) {
+    const cookie = (await rawLogin()).headers.getSetCookie().find((c) => c.startsWith('token='));
+    jtis.push(jwt.verify(/token=([^;]+)/.exec(cookie)[1], process.env.JWT_SECRET).jti);
+  }
+  assert.notEqual(jtis[0], jtis[1]);
+});
+test('token sem jti nao autentica (nao poderia ser encerrado no logout)', async () => {
+  const legacy = jwt.sign({ sub: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+  const response = await fetch(base + '/api/incidents', { headers: { Authorization: `Bearer ${legacy}` } });
+  assert.equal(response.status, 401);
+});
+test('sessao revogada no logout deixa de autenticar', async () => {
+  mock.method(prisma.revokedSession, 'findUnique', async ({ where }) => { assert.equal(where.jti, 'test-session'); return { jti: 'test-session' }; });
+  const result = await request('/incidents');
+  assert.equal(result.status, 401);
+  assert.match(result.body.error, /Sessao encerrada/);
+});
+async function logoutWith(cookieToken) {
+  return fetch(base + '/api/auth/logout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: `token=${cookieToken}; csrfToken=abc`, 'X-CSRF-Token': 'abc' },
+  });
+}
+test('logout registra o jti da sessao ate o token expirar e limpa os cookies', async () => {
+  const calls = { upsert: [], deleteMany: [] };
+  mock.method(prisma.revokedSession, 'upsert', async (args) => { calls.upsert.push(args); });
+  mock.method(prisma.revokedSession, 'deleteMany', async (args) => { calls.deleteMany.push(args); });
+  const exp = jwt.decode(token).exp;
+  const response = await logoutWith(token);
+  assert.equal(response.status, 200);
+  assert.equal(calls.upsert.length, 1);
+  assert.equal(calls.upsert[0].where.jti, 'test-session');
+  assert.equal(calls.upsert[0].create.jti, 'test-session');
+  assert.equal(calls.upsert[0].create.expiresAt.getTime(), exp * 1000);
+  assert.ok(calls.deleteMany[0].where.expiresAt.lt instanceof Date, 'limpa sessoes revogadas ja expiradas');
+  const cookies = response.headers.getSetCookie();
+  assert.match(cookies.find((c) => c.startsWith('token=')), /Expires=Thu, 01 Jan 1970/);
+});
+test('logout com token invalido ou expirado nao revoga nada, mas limpa os cookies', async () => {
+  const upsert = mock.method(prisma.revokedSession, 'upsert', async () => { throw new Error('nao deveria revogar'); });
+  const expired = jwt.sign({ sub: user.id }, process.env.JWT_SECRET, { expiresIn: -10, jwtid: 'old' });
+  for (const bad of ['lixo', expired]) {
+    const response = await logoutWith(bad);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.getSetCookie().find((c) => c.startsWith('token=')), /Expires=Thu, 01 Jan 1970/);
+  }
+  assert.equal(upsert.mock.callCount(), 0);
+});
+test('logout falha e NAO limpa os cookies se a revogacao nao for gravada', async () => {
+  mock.method(prisma.revokedSession, 'upsert', async () => { throw new Error('banco indisponivel'); });
+  const response = await logoutWith(token);
+  assert.equal(response.status, 500);
+  assert.equal(response.headers.getSetCookie().some((c) => c.startsWith('token=')), false);
 });
 test('PATCH rejeita string false e ausencia do campo active', async () => {
   for (const resource of ['users', 'teams', 'tents']) {
@@ -460,6 +518,19 @@ test('Socket.IO recusa conexao sem sessao', async () => {
     const rejected = socketEvent(socket, 'connect_error');
     socket.connect();
     assert.match((await rejected).message, /autenticado/);
+  } finally { socket.disconnect(); }
+});
+test('Socket.IO desconecta a sessao revogada no logout', async () => {
+  const socket = connectSocket(base, { autoConnect: false, reconnection: false, transports: ['websocket'], extraHeaders: { Authorization: `Bearer ${token}` } });
+  try {
+    const connected = socketEvent(socket, 'connect'); socket.connect(); await connected;
+    mock.method(prisma.revokedSession, 'findUnique', async () => ({ jti: 'test-session' }));
+    const disconnected = socketEvent(socket, 'disconnect');
+    let leaked = false;
+    socket.on('incident:updated', () => { leaked = true; });
+    await publishIncident('incident:updated', { id: 'private-event' });
+    await disconnected;
+    assert.equal(leaked, false);
   } finally { socket.disconnect(); }
 });
 test('Socket.IO entrega a equipe autenticada e bloqueia eventos apos desativacao', async () => {

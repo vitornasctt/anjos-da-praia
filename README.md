@@ -185,7 +185,7 @@ Base: `/api`
 | Método | Rota | Acesso | Descrição |
 |---|---|---|---|
 | POST | `/auth/login` | público | Autenticação; define cookies `token` (httpOnly) e `csrfToken` |
-| POST | `/auth/logout` | sessão via cookie / CSRF | Encerra a sessão (limpa os cookies no servidor) |
+| POST | `/auth/logout` | sessão via cookie / CSRF | Encerra a sessão: revoga o token no servidor (lista `revoked_sessions`) e limpa os cookies |
 | GET | `/auth/me` | autenticado | Usuário logado |
 | GET | `/public/wristbands/:printedNumber/check` | público | Verifica se a pulseira existe |
 | GET | `/public/beaches` | público | Lista de praias (fallback sem geolocalização) |
@@ -280,13 +280,14 @@ O seed também cria a praia "Praia de Camburi", uma tenda, uma equipe ("Equipe A
 ## Segurança
 
 - Senhas com hash bcrypt (nunca texto puro)
-- Sessão em **cookie estritamente necessário**: `HttpOnly`, `Secure` em produção, `SameSite=Lax`, validade de 8h (igual à do JWT), contendo apenas o ID do usuário (nenhum dado de criança/responsável). Respostas de `/auth/*` usam `Cache-Control: no-store`, e o logout expira os cookies. Não há cookies de analytics/marketing, então não há banner de consentimento
+- Sessão em **cookie estritamente necessário**: `HttpOnly`, `Secure` em produção, `SameSite=Lax`, validade de 8h (igual à do JWT), contendo apenas o ID do usuário e um identificador único da sessão (`jti`), sem nenhum dado de criança/responsável. Respostas de `/auth/*` usam `Cache-Control: no-store`, e o logout expira os cookies. Não há cookies de analytics/marketing, então não há banner de consentimento
 - Autenticação JWT em **cookie httpOnly** (inacessível via JavaScript, reduz o risco de roubo de sessão por XSS) + autorização por perfil validada em **todas** as rotas sensíveis no backend (nunca apenas escondendo botão na UI)
 - Proteção **CSRF** (padrão double-submit cookie): toda requisição que altera estado com sessão via cookie exige o header `X-CSRF-Token` correspondente ao cookie `csrfToken`
 - Validação e sanitização de entrada com Zod em todas as rotas que recebem dados do cliente
 - Proteção contra SQL Injection via Prisma (queries parametrizadas, sem SQL manual)
 - `helmet` (cabeçalhos HTTP seguros) e `cors` restrito à origem do frontend, com `credentials: true`
 - Rate limiting dedicado no endpoint público de login e de criação de ocorrências
+- **Logout invalida a sessão no servidor**: o `jti` do token vai para a tabela `revoked_sessions` até o token expirar, e toda requisição autenticada (e cada evento do WebSocket) consulta essa lista. Só a sessão que saiu é encerrada; a mesma conta em outro aparelho continua logada. Se a revogação não for gravada, o logout retorna erro em vez de fingir que saiu. Tokens sem `jti` não são aceitos
 - Reenvios reutilizam qualquer ocorrência ainda aberta da mesma pulseira. Cadastro, criação de alerta e transições usam transações serializáveis com repetição limitada em conflitos
 - Logs de auditoria (`audit_logs`) para cadastro e ações administrativas; cadastro e transições gravam auditoria dentro da mesma transação
 - Contas inativas são recusadas em cada requisição; notificações WebSocket também revalidam a sessão

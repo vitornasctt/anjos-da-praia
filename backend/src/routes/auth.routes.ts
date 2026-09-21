@@ -8,7 +8,8 @@ import rateLimit from "express-rate-limit";
 import { prisma } from "../lib/prisma";
 import { env } from "../config/env";
 import { validateBody } from "../middlewares/validate";
-import { authenticate } from "../middlewares/auth";
+import { authenticate, verifySessionToken } from "../middlewares/auth";
+import { disconnectToken } from "../lib/io";
 
 const router = Router();
 
@@ -59,10 +60,11 @@ router.post("/login", loginLimiter, validateBody(loginSchema), asyncHandler(asyn
 
   // So o ID no token: perfil e nome sao lidos do banco a cada requisicao
   // (ver sessionUser), entao nada pessoal precisa viajar no cookie.
+  // jwtid: identificador unico da sessao, para poder encerrar so ela no logout.
   const token = jwt.sign(
     { sub: user.id },
     env.jwtSecret,
-    { expiresIn: env.jwtExpiresIn } as jwt.SignOptions
+    { expiresIn: env.jwtExpiresIn, jwtid: crypto.randomUUID() } as jwt.SignOptions
   );
   const csrfToken = crypto.randomBytes(24).toString("hex");
 
@@ -82,10 +84,29 @@ router.post("/login", loginLimiter, validateBody(loginSchema), asyncHandler(asyn
     });
 }));
 
-router.post("/logout", (req, res) => {
-  // Clearing cookies must also work after expiration or account deactivation.
+router.post("/logout", asyncHandler(async (req, res) => {
+  // Encerra a sessao no servidor: o jti do token entra na lista de sessoes
+  // revogadas ate o token expirar, entao ele para de funcionar mesmo que
+  // alguem o tenha copiado. Outras sessoes da mesma conta nao sao afetadas.
+  // Se a revogacao falhar, responde erro e NAO limpa os cookies: assim o
+  // usuario sabe que ainda nao saiu e pode tentar de novo.
+  const header = req.headers.authorization;
+  const token: string | null = req.cookies?.token ?? (header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : null);
+  const session = token ? verifySessionToken(token) : null;
+  if (token && session) {
+    await prisma.revokedSession.upsert({
+      where: { jti: session.jti },
+      create: { jti: session.jti, expiresAt: new Date((session.exp ?? 0) * 1000) },
+      update: {},
+    });
+    disconnectToken(token);
+    // Limpeza oportunista: sessoes revogadas que ja expiraram nao precisam ficar na lista.
+    await prisma.revokedSession.deleteMany({ where: { expiresAt: { lt: new Date() } } }).catch(() => undefined);
+  }
+  // Token ausente, expirado ou invalido: nada a revogar, mas os cookies sao
+  // limpos mesmo assim (tambem apos expiracao ou desativacao da conta).
   res.clearCookie("token", cookieOptions(true)).clearCookie("csrfToken", cookieOptions(false)).json({ ok: true });
-});
+}));
 
 router.get("/me", authenticate, asyncHandler(async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
