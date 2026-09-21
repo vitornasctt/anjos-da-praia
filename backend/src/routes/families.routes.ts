@@ -151,7 +151,10 @@ router.delete("/:id/personal-data", authorize("ADMIN"), asyncHandler(async (req,
     if (hasOpenIncident) throw new HttpError(409, "Existe atendimento em andamento para esta familia. Conclua ou cancele antes de apagar os dados.");
 
     const childIds = family.children.map((child) => child.id);
+    const wristbandIds = family.children.flatMap((child) => child.wristbands.map((band) => band.id));
     await tx.wristband.updateMany({ where: { childId: { in: childIds }, status: { not: "ENCERRADA" } }, data: { status: "ENCERRADA" } });
+    // Telefone de quem encontrou a crianca tambem e dado pessoal: some junto.
+    await tx.incident.updateMany({ where: { wristbandId: { in: wristbandIds }, finderPhone: { not: null } }, data: { finderPhone: null } });
     await tx.child.updateMany({
       where: { id: { in: childIds } },
       data: { firstName: ANONYMIZED_LABEL, optionalIdentificationNote: null, photoUrl: null },

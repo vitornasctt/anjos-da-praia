@@ -59,12 +59,17 @@ export const createIncidentSchema = z
     locationAccuracy: z.number().nonnegative().optional(),
     beachId: z.string().optional(),
     referencePoint: z.string().trim().max(200).optional(),
+    // Telefone opcional de quem encontrou. Nunca pode impedir o alerta: um valor
+    // invalido (ex.: texto muito longo) e simplesmente ignorado.
+    finderPhone: z.string().trim().max(20).optional().catch(undefined),
   })
   .refine((data) => (data.latitude == null) === (data.longitude == null), { message: "Informe latitude e longitude juntas." })
   .refine((data) => data.latitude != null || Boolean(data.beachId || data.referencePoint), { message: "Informe a localizacao, a praia ou um ponto de referencia." });
 
 router.post("/incidents", publicLimiter, validateBody(createIncidentSchema), asyncHandler(async (req, res) => {
   const { printedNumber, latitude, longitude, locationAccuracy, beachId, referencePoint } = req.body;
+  // So guarda se parecer um telefone (ao menos 8 digitos); senao, segue sem ele.
+  const finderPhone: string | null = req.body.finderPhone && req.body.finderPhone.replace(/\D/g, "").length >= 8 ? req.body.finderPhone : null;
   const result = await serializable(async (tx) => {
     const wristband = await tx.wristband.findUnique({
       where: { printedNumber },
@@ -76,9 +81,16 @@ router.post("/incidents", publicLimiter, validateBody(createIncidentSchema), asy
       where: { wristbandId: wristband.id, status: { notIn: ["REENCONTRO_REALIZADO", "CANCELADA"] } },
       orderBy: { createdAt: "desc" },
     });
-    if (existing) return { incident: existing, created: false, wristband };
+    if (existing) {
+      // Reenvio com telefone: completa a ocorrencia aberta se ainda nao tinha um.
+      if (finderPhone && !existing.finderPhone) {
+        const updated = await tx.incident.update({ where: { id: existing.id }, data: { finderPhone } });
+        return { incident: updated, created: false, wristband };
+      }
+      return { incident: existing, created: false, wristband };
+    }
     const incident = await tx.incident.create({ data: {
-      wristbandId: wristband.id, latitude, longitude, locationAccuracy, beachId, referencePoint,
+      wristbandId: wristband.id, latitude, longitude, locationAccuracy, beachId, referencePoint, finderPhone,
       status: "CRIANCA_LOCALIZADA",
       statusHistory: { create: { previousStatus: null, newStatus: "CRIANCA_LOCALIZADA" } },
     } });

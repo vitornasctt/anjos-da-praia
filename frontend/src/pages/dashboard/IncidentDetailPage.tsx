@@ -7,6 +7,7 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Skeleton } from "../../components/Skeleton";
 import { useAuth } from "../../context/AuthContext";
+import { formatDistance } from "../../utils/distance";
 
 const STATUS_ORDER: IncidentStatus[] = [
   "CRIANCA_LOCALIZADA",
@@ -182,10 +183,21 @@ export function IncidentDetailPage() {
             {incident.nearestTent && (
               <p className="mt-1 text-sm text-ocean-600">
                 Tenda mais próxima: <strong>{incident.nearestTent.name}</strong> (~
-                {incident.nearestTent.distanceMeters < 1000
-                  ? `${incident.nearestTent.distanceMeters} m`
-                  : `${(incident.nearestTent.distanceMeters / 1000).toFixed(1)} km`}
-                )
+                {formatDistance(incident.nearestTent.distanceMeters)})
+              </p>
+            )}
+            {incident.farFromTents && incident.nearestTent && (
+              <p className="mt-2 rounded-lg bg-orange-100 px-3 py-2 text-sm font-semibold text-orange-900">
+                Longe das tendas: a tenda mais próxima fica a ~{formatDistance(incident.nearestTent.distanceMeters)}.
+                Pode ser preciso um deslocamento maior.
+              </p>
+            )}
+            {incident.finderPhone && (
+              <p className="mt-3 text-sm text-ocean-700">
+                Telefone de quem encontrou:{" "}
+                <a href={`tel:${incident.finderPhone.replace(/[^\d+]/g, "")}`} className="font-semibold text-ocean-600 underline">
+                  {incident.finderPhone}
+                </a>
               </p>
             )}
           </Section>

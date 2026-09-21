@@ -4,7 +4,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { authenticate, authorize } from "../middlewares/auth";
-import { findNearestTent } from "../utils/geo";
+import { findNearestTent, FAR_FROM_TENT_METERS } from "../utils/geo";
 import { purgeOldPersonalData } from "../jobs/dataRetention";
 import { validateBody } from "../middlewares/validate";
 import { audit } from "../utils/audit";
@@ -14,8 +14,7 @@ router.use(authenticate, authorize("ADMIN"));
 
 // Alerta com GPS nao guarda a praia (so quem usa o fluxo sem GPS escolhe uma).
 // No relatorio, a praia e deduzida pela tenda mais proxima, desde que ela esteja
-// a ate esta distancia; alem disso o alerta nao e atribuido a nenhuma praia.
-const MAX_TENT_DISTANCE_FOR_BEACH_METERS = 2000;
+// a ate FAR_FROM_TENT_METERS; alem disso o alerta nao e atribuido a nenhuma praia.
 
 router.get("/overview", asyncHandler(async (_req, res) => {
   const [families, children, reunited, totalIncidents, beaches, tents, incidents] = await Promise.all([
@@ -58,7 +57,7 @@ router.get("/overview", asyncHandler(async (_req, res) => {
       label = beachNameById.get(incident.beachId) ?? "Praia desconhecida";
     } else if (incident.latitude != null && incident.longitude != null) {
       const nearest = findNearestTent({ latitude: incident.latitude, longitude: incident.longitude }, tents);
-      label = nearest && nearest.distanceMeters <= MAX_TENT_DISTANCE_FOR_BEACH_METERS
+      label = nearest && nearest.distanceMeters <= FAR_FROM_TENT_METERS
         ? beachNameById.get(nearest.tent.beachId) ?? "Praia desconhecida"
         : "Fora da área das tendas";
     } else {

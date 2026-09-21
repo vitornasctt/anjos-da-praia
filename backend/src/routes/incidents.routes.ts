@@ -7,7 +7,7 @@ import { authenticate, authorize } from "../middlewares/auth";
 import { validateBody } from "../middlewares/validate";
 import { audit } from "../utils/audit";
 import { IncidentStatus, INCIDENT_STATUSES } from "../constants/enums";
-import { findNearestTent } from "../utils/geo";
+import { findNearestTent, FAR_FROM_TENT_METERS } from "../utils/geo";
 import { publishIncident } from "../lib/io";
 import { serializable } from "../lib/transaction";
 import { HttpError } from "../utils/httpError";
@@ -21,9 +21,9 @@ import { paginationQuerySchema, takeForPage, splitPage, MAX_PAGE_SIZE } from "..
 async function withNearestTent<T extends { latitude: number | null; longitude: number | null }>(
   incident: T,
   availableTents?: { id: string; name: string; latitude: number; longitude: number }[]
-): Promise<T & { nearestTent: { id: string; name: string; distanceMeters: number } | null }> {
+): Promise<T & { nearestTent: { id: string; name: string; distanceMeters: number } | null; farFromTents: boolean }> {
   if (incident.latitude == null || incident.longitude == null) {
-    return { ...incident, nearestTent: null };
+    return { ...incident, nearestTent: null, farFromTents: false };
   }
   const tents = availableTents ?? await prisma.tent.findMany({ where: { active: true } });
   const nearest = findNearestTent({ latitude: incident.latitude, longitude: incident.longitude }, tents);
@@ -32,6 +32,9 @@ async function withNearestTent<T extends { latitude: number | null; longitude: n
     nearestTent: nearest
       ? { id: nearest.tent.id, name: nearest.tent.name, distanceMeters: Math.round(nearest.distanceMeters) }
       : null,
+    // Com GPS mas longe da tenda ativa mais proxima (ou sem nenhuma tenda ativa
+    // por perto): a equipe precisa saber que o deslocamento sera maior.
+    farFromTents: nearest ? nearest.distanceMeters > FAR_FROM_TENT_METERS : false,
   };
 }
 
@@ -136,7 +139,9 @@ router.get("/", asyncHandler(async (req, res) => {
   // para enriquecer so os itens da pagina atual, nunca a tabela inteira.
   const tents = await prisma.tent.findMany({ where: { active: true } });
   const enriched = await Promise.all(items.map((incident) => withNearestTent(incident, tents)));
-  res.json({ items: enriched, nextCursor, total });
+  // O telefone de quem encontrou so vai no detalhe da ocorrencia, nunca na lista.
+  const listed = enriched.map(({ finderPhone: _finderPhone, ...rest }) => rest);
+  res.json({ items: listed, nextCursor, total });
 }));
 
 router.get("/summary", asyncHandler(async (_req, res) => {

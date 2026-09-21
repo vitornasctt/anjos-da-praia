@@ -34,7 +34,10 @@ export async function purgeOldPersonalData(retentionDays: number) {
       ));
       if (!eligible) continue;
       const childIds = family.children.map((child) => child.id);
+      const wristbandIds = family.children.flatMap((child) => child.wristbands.map((band) => band.id));
       await tx.wristband.updateMany({ where: { childId: { in: childIds }, status: { not: "ENCERRADA" } }, data: { status: "ENCERRADA" } });
+      // Telefone de quem encontrou a crianca tambem e dado pessoal: some junto.
+      await tx.incident.updateMany({ where: { wristbandId: { in: wristbandIds }, finderPhone: { not: null } }, data: { finderPhone: null } });
       const children = await tx.child.updateMany({
         where: { id: { in: childIds }, OR: [{ firstName: { not: ANONYMIZED_LABEL } }, { optionalIdentificationNote: { not: null } }, { photoUrl: { not: null } }] },
         data: { firstName: ANONYMIZED_LABEL, optionalIdentificationNote: null, photoUrl: null },

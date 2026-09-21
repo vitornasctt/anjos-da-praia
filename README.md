@@ -46,7 +46,8 @@ MVP (entregue):
 Diferenciais incluídos:
 - Mapa de ocorrências e tendas com Leaflet/OpenStreetMap (uso restrito à equipe)
 - QR Code único e genérico (o mesmo em todos os cartazes e pulseiras), com impressão de cartaz A4 e de folha de etiquetas adesivas para as pulseiras: quem acha a criança escaneia e digita o número impresso na pulseira
-- Identificação automática da tenda ativa mais próxima de cada ocorrência (haversine)
+- Identificação automática da tenda ativa mais próxima de cada ocorrência (haversine), com destaque **"Longe das tendas"** no painel e na ocorrência quando ela fica a mais de 2 km, para a equipe saber que o deslocamento será maior
+- Telefone opcional de quem encontrou a criança, informado na página pública, para a equipe ligar (aparece só no detalhe da ocorrência, como link de ligação)
 - Notificações em tempo real no painel via WebSocket (com polling como rede de segurança)
 - Relatórios (famílias, crianças, ocorrências por praia/tenda/horário, tempo médio de atendimento)
 - Rotina de retenção/expurgo de dados pessoais (LGPD), automática (diária) e sob demanda
@@ -189,7 +190,7 @@ Base: `/api`
 | GET | `/auth/me` | autenticado | Usuário logado |
 | GET | `/public/wristbands/:printedNumber/check` | público | Verifica se a pulseira existe |
 | GET | `/public/beaches` | público | Lista de praias (fallback sem geolocalização) |
-| POST | `/public/incidents` | público (rate limited) | Cria a ocorrência a partir do QR Code |
+| POST | `/public/incidents` | público (rate limited) | Cria a ocorrência a partir do QR Code. Aceita `finderPhone` opcional (telefone de quem encontrou); um valor inválido é ignorado e nunca bloqueia o alerta |
 | POST | `/families/intake` | ADMIN, ATENDENTE | Cadastro rápido: família (com endereço opcional) + 1 a 10 crianças, cada uma com sua pulseira, em uma transação (`children: [...]`) |
 | GET | `/families`, `/families/:id` | ADMIN, ATENDENTE | Listagem paginada por cursor (`cursor`, `limit`, `search`) / detalhe |
 | GET | `/wristbands/search?printedNumber=` | ADMIN, ATENDENTE | Busca pulseira |
@@ -299,7 +300,7 @@ Pendências conhecidas para produção (fora do escopo do MVP do hackathon): rot
 
 ## LGPD e privacidade
 
-- **Minimização de dados**: o cadastro coleta apenas nome, telefone e endereço (opcional) do responsável, primeiro nome da criança, uma observação opcional e uma foto opcional — nunca CPF ou RG. O endereço só é exibido a usuários autenticados e é apagado junto com os demais dados pessoais (rotina de retenção e exclusão manual).
+- **Minimização de dados**: o cadastro coleta apenas nome, telefone e endereço (opcional) do responsável, primeiro nome da criança, uma observação opcional e uma foto opcional — nunca CPF ou RG. O endereço só é exibido a usuários autenticados e é apagado junto com os demais dados pessoais (rotina de retenção e exclusão manual). O telefone de quem encontrou a criança é opcional, fica só no detalhe da ocorrência (nunca na lista nem na resposta pública) e é apagado pelas mesmas duas rotinas.
 - **Finalidade**: os dados só existem para viabilizar o reencontro durante a operação da Associação.
 - A página pública do QR Code **nunca** expõe dados pessoais de crianças ou responsáveis — apenas confirma o recebimento do alerta.
 - Dados de responsáveis só são visíveis para usuários autenticados e autorizados (equipe/atendente/admin), na tela de ocorrência.

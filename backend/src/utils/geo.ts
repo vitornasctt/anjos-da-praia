@@ -1,5 +1,9 @@
 // Distancia aproximada entre dois pontos (formula de haversine), usada
 // para identificar a tenda mais proxima de uma ocorrencia (item 13/24).
+// Acima desta distancia ate a tenda ativa mais proxima, um alerta e considerado
+// "longe das tendas": destacado no painel e sem praia deduzida no relatorio.
+export const FAR_FROM_TENT_METERS = 2000;
+
 export function distanceInMeters(
   lat1: number,
   lon1: number,

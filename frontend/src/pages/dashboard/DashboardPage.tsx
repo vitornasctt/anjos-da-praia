@@ -5,6 +5,7 @@ import { apiRequest } from "../../services/api";
 import { getSocket } from "../../services/socket";
 import { Incident, IncidentSummary, Page } from "../../types";
 import { StatusBadge } from "../../components/StatusBadge";
+import { formatDistance } from "../../utils/distance";
 import { Spinner } from "../../components/Spinner";
 import { SkeletonStatCards, SkeletonRows } from "../../components/Skeleton";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
@@ -280,13 +281,18 @@ export function DashboardPage() {
             }`}
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="text-lg font-bold text-ocean-900">
                   Pulseira #{incident.wristband?.printedNumber}
                 </span>
                 {isNew(incident.createdAt) && (
                   <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">
                     NOVA
+                  </span>
+                )}
+                {incident.farFromTents && incident.nearestTent && (
+                  <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-bold text-orange-900">
+                    Longe das tendas · {formatDistance(incident.nearestTent.distanceMeters)}
                   </span>
                 )}
               </div>

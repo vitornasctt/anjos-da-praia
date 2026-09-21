@@ -282,6 +282,71 @@ test('reenvio reutiliza atendimento aberto mesmo apos dois minutos', async () =>
   assert.equal(result.status, 200);
   assert.deepEqual(result.body, { id: 'old-open', status: 'EQUIPE_A_CAMINHO' });
 });
+test('telefone de quem encontrou: opcional, valido e guardado, invalido e ignorado sem bloquear o alerta', async () => {
+  assert.equal(createIncidentSchema.safeParse({ printedNumber: '4821', referencePoint: 'x', finderPhone: '2'.repeat(50) }).success, true);
+  assert.equal(createIncidentSchema.parse({ printedNumber: '4821', referencePoint: 'x', finderPhone: '2'.repeat(50) }).finderPhone, undefined);
+  const created = [];
+  for (const finderPhone of ['(27) 99999-0000', '123', '', undefined, 'sem numero']) {
+    transaction({
+      wristband: { findUnique: async () => ({ id: 'band', status: 'ATIVA', childId: 'child' }) },
+      incident: { findFirst: async () => null, create: async ({ data }) => { created.push(data.finderPhone); return { id: 'new', status: data.status }; } },
+    });
+    const result = await request('/public/incidents', { printedNumber: '4821', referencePoint: 'Posto 3', finderPhone }, { public: true });
+    assert.equal(result.status, 201, 'o alerta nunca e bloqueado por causa do telefone');
+    assert.deepEqual(Object.keys(result.body).sort(), ['id', 'status'], 'a resposta publica nao devolve dado nenhum');
+  }
+  assert.deepEqual(created, ['(27) 99999-0000', null, null, null, null]);
+});
+test('reenvio com telefone completa a ocorrencia aberta sem sobrescrever um telefone ja informado', async () => {
+  const updates = [];
+  transaction({
+    wristband: { findUnique: async () => ({ id: 'band', status: 'ATIVA', childId: 'child' }) },
+    incident: { findFirst: async () => ({ id: 'open', status: 'EQUIPE_A_CAMINHO', finderPhone: null }), update: async ({ data }) => { updates.push(data); return { id: 'open', status: 'EQUIPE_A_CAMINHO', ...data }; }, create: async () => assert.fail('nao duplica') },
+  });
+  const first = await request('/public/incidents', { printedNumber: '4821', referencePoint: 'Posto', finderPhone: '27999990000' }, { public: true });
+  assert.equal(first.status, 200);
+  assert.deepEqual(updates, [{ finderPhone: '27999990000' }]);
+  transaction({
+    wristband: { findUnique: async () => ({ id: 'band', status: 'ATIVA', childId: 'child' }) },
+    incident: { findFirst: async () => ({ id: 'open', status: 'EQUIPE_A_CAMINHO', finderPhone: '27111112222' }), update: async () => assert.fail('nao sobrescreve'), create: async () => assert.fail('nao duplica') },
+  });
+  const second = await request('/public/incidents', { printedNumber: '4821', referencePoint: 'Posto', finderPhone: '27999990000' }, { public: true });
+  assert.equal(second.status, 200);
+});
+test('painel destaca alerta longe das tendas (>2 km) e a lista nunca traz o telefone de quem encontrou', async () => {
+  const at = (lat, lon, id) => ({ id, createdAt: new Date(), status: 'CRIANCA_LOCALIZADA', latitude: lat, longitude: lon, finderPhone: '27999990000', wristband: { printedNumber: '1' }, beach: null, assignedTeam: null });
+  mock.method(prisma.incident, 'findMany', async () => [at(-20.6510, -40.5000, 'perto'), at(-20.7000, -40.5000, 'longe'), at(null, null, 'sem-gps')]);
+  mock.method(prisma.incident, 'count', async () => 3);
+  mock.method(prisma.tent, 'findMany', async () => [{ id: 't1', name: 'Tenda 1', latitude: -20.6500, longitude: -40.5000, active: true }]);
+  const result = await request('/incidents');
+  assert.equal(result.status, 200);
+  const byId = Object.fromEntries(result.body.items.map((i) => [i.id, i]));
+  assert.equal(byId.perto.farFromTents, false);
+  assert.equal(byId.longe.farFromTents, true);
+  assert.ok(byId.longe.nearestTent.distanceMeters > 2000);
+  assert.equal(byId['sem-gps'].farFromTents, false, 'sem GPS nao tem como saber a distancia');
+  assert.ok(result.body.items.every((i) => !('finderPhone' in i)), 'a lista nao expoe o telefone');
+});
+test('detalhe da ocorrencia traz o telefone de quem encontrou e o destaque de distancia', async () => {
+  mock.method(prisma.incident, 'findUnique', async () => ({ id: 'i', latitude: -20.7000, longitude: -40.5000, beachId: null, finderPhone: '27999990000', wristband: {}, beach: null, assignedTeam: null, statusHistory: [] }));
+  mock.method(prisma.tent, 'findMany', async () => [{ id: 't1', name: 'Tenda 1', latitude: -20.6500, longitude: -40.5000, active: true }]);
+  const result = await request('/incidents/i');
+  assert.equal(result.status, 200);
+  assert.equal(result.body.finderPhone, '27999990000');
+  assert.equal(result.body.farFromTents, true);
+});
+test('apagar dados pessoais da familia tambem apaga o telefone de quem encontrou', async () => {
+  const cleared = [];
+  transaction({
+    family: { findUnique: async () => ({ id: 'f', children: [{ id: 'c1', wristbands: [{ id: 'b1', incidents: [{ status: 'REENCONTRO_REALIZADO' }] }] }] }), update: async () => ({}) },
+    wristband: { updateMany: async () => ({}) },
+    incident: { updateMany: async ({ where, data }) => { cleared.push([where.wristbandId.in, data.finderPhone]); } },
+    child: { updateMany: async () => ({}) }, auditLog: { create: async () => ({}) },
+  });
+  const result = await request('/families/f/personal-data', undefined, { method: 'DELETE' });
+  assert.equal(result.status, 200);
+  assert.deepEqual(cleared, [[['b1'], null]]);
+});
 test('consultas de acompanhamento nao gastam a cota de envio', async () => {
   mock.method(prisma.incident, 'findUnique', async () => ({ status: 'CRIANCA_LOCALIZADA' }));
   for (let i = 0; i < 25; i++) assert.equal((await request('/public/incidents/test/status', undefined, { public: true })).status, 200);
@@ -460,6 +525,7 @@ test('retencao preserva familia com outro caso aberto e expira cadastro antigo s
   const child = (id, wristbands) => ({ id, createdAt: old, wristbands });
   const family = (id, children) => ({ id, createdAt: old, children, responsibleName: 'Nome', responsiblePhone: '27999990000' });
   const updated = [];
+  const clearedFinderPhones = [];
   transaction({
     family: { findMany: async () => [
       family('protected', [child('c1', [band('b1', [
@@ -469,9 +535,11 @@ test('retencao preserva familia com outro caso aberto e expira cadastro antigo s
       family('expired', [child('c2', [band('b2', [])])]),
     ], update: async ({ where, data }) => { updated.push(where.id); assert.equal(data.responsiblePhone, ANONYMIZED_LABEL); assert.equal(data.responsibleAddress, null); } },
     wristband: { updateMany: async ({ where, data }) => { assert.deepEqual(where.childId.in, ['c2']); assert.equal(data.status, 'ENCERRADA'); } },
+    incident: { updateMany: async ({ where, data }) => { clearedFinderPhones.push(where.wristbandId.in); assert.equal(data.finderPhone, null); } },
     child: { updateMany: async () => ({ count: 1 }) }, auditLog: { create: async () => ({}) },
   });
   const result = await purgeOldPersonalData(90);
+  assert.deepEqual(clearedFinderPhones, [['b2']], 'so apaga o telefone de quem encontrou das pulseiras da familia expirada');
   assert.deepEqual(updated, ['expired']);
   assert.equal(result.anonymizedFamilies, 1);
   assert.equal(result.anonymizedChildren, 1);

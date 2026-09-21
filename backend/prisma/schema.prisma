@@ -142,6 +142,9 @@ model Incident {
   locationAccuracy  Float?
   beachId           String?
   referencePoint    String?
+  // Telefone de quem encontrou a crianca (opcional, informado no fluxo publico):
+  // so para a equipe ligar. Dado pessoal de terceiro: apagado pela retencao LGPD.
+  finderPhone       String?
   status            String         @default("CRIANCA_LOCALIZADA")
   assignedTeamId    String?
   assignedById       String?

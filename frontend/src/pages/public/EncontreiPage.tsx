@@ -35,6 +35,8 @@ interface PageCopy {
   selectPlaceholder: string;
   referenceLabel: string;
   referencePlaceholder: string;
+  finderPhoneLabel: string;
+  finderPhoneHelp: string;
   fallbackRequired: string;
   retryLocation: string;
   sendAlertBtn: string;
@@ -70,6 +72,8 @@ const COPY: Record<Lang, PageCopy> = {
     selectPlaceholder: "Selecione...",
     referenceLabel: "Ponto de referência (opcional)",
     referencePlaceholder: "Ex: perto do Posto 3",
+    finderPhoneLabel: "Seu telefone (opcional)",
+    finderPhoneHelp: "Para nossa equipe ligar para você, se precisar.",
     fallbackRequired: "Selecione a praia ou informe um ponto de referência.",
     retryLocation: "Tentar localização novamente",
     sendAlertBtn: "ENVIAR ALERTA",
@@ -125,6 +129,8 @@ const COPY: Record<Lang, PageCopy> = {
     selectPlaceholder: "Select...",
     referenceLabel: "Reference point (optional)",
     referencePlaceholder: "E.g.: near Lifeguard Post 3",
+    finderPhoneLabel: "Your phone (optional)",
+    finderPhoneHelp: "So our team can call you if needed.",
     fallbackRequired: "Select the beach or enter a reference point.",
     retryLocation: "Try location again",
     sendAlertBtn: "SEND ALERT",
@@ -180,6 +186,8 @@ const COPY: Record<Lang, PageCopy> = {
     selectPlaceholder: "Selecciona...",
     referenceLabel: "Punto de referencia (opcional)",
     referencePlaceholder: "Ej.: cerca del Puesto 3",
+    finderPhoneLabel: "Tu teléfono (opcional)",
+    finderPhoneHelp: "Para que nuestro equipo te llame si es necesario.",
     fallbackRequired: "Selecciona la playa o indica un punto de referencia.",
     retryLocation: "Intentar ubicación de nuevo",
     sendAlertBtn: "ENVIAR ALERTA",
@@ -230,6 +238,30 @@ function detectDefaultLang(): Lang {
   return "pt";
 }
 
+// Campo opcional de telefone: pequeno e discreto, para nao atrasar quem so quer
+// enviar o alerta. Fica sempre no mesmo estado, entre as etapas.
+function FinderPhoneField({
+  id, value, onChange, label, help,
+}: { id: string; value: string; onChange: (v: string) => void; label: string; help: string }) {
+  return (
+    <div className="text-left">
+      <label htmlFor={id} className="mb-1 block text-sm font-semibold text-ocean-900">{label}</label>
+      <input
+        id={id}
+        type="tel"
+        inputMode="tel"
+        autoComplete="tel"
+        maxLength={20}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="(27) 99999-0000"
+        className="w-full rounded-xl border-2 border-ocean-200 px-4 py-3 text-lg text-ocean-900 focus:border-ocean-500"
+      />
+      <p className="mt-1 text-xs text-ocean-600">{help}</p>
+    </div>
+  );
+}
+
 // Fluxo publico acessado pelo QR Code generico (o mesmo em todos os cartazes
 // e pulseiras): a pessoa digita o numero impresso na pulseira, compartilha a
 // localizacao e envia o alerta. Prioridade absoluta: o menor numero de
@@ -254,6 +286,8 @@ export function EncontreiPage() {
   const [loadingBeaches, setLoadingBeaches] = useState(false);
   const [selectedBeachId, setSelectedBeachId] = useState("");
   const [referencePoint, setReferencePoint] = useState("");
+  // Opcional: nunca bloqueia o alerta (o servidor ignora um telefone invalido).
+  const [finderPhone, setFinderPhone] = useState("");
 
   useEffect(() => {
     try {
@@ -301,7 +335,11 @@ export function EncontreiPage() {
     try {
       const result = await apiRequest<{ id: string; status: IncidentStatus }>("/public/incidents", {
         method: "POST",
-        body: { printedNumber: printedNumber.trim(), ...payload },
+        body: {
+          printedNumber: printedNumber.trim(),
+          ...payload,
+          ...(finderPhone.trim() ? { finderPhone: finderPhone.trim() } : {}),
+        },
       });
       setIncidentId(result.id);
       setLiveStatus(result.status);
@@ -450,6 +488,7 @@ export function EncontreiPage() {
             <p className="text-base text-ocean-800">
               {t.locationPrompt}
             </p>
+            <FinderPhoneField id="finderPhone" value={finderPhone} onChange={setFinderPhone} label={t.finderPhoneLabel} help={t.finderPhoneHelp} />
             {error && <p role="alert" className="text-sm font-medium text-red-600">{error}</p>}
             <button
               onClick={requestLocation}
@@ -504,6 +543,7 @@ export function EncontreiPage() {
                 className="w-full rounded-xl border-2 border-ocean-200 px-4 py-3 text-lg text-ocean-900 focus:border-ocean-500"
               />
             </div>
+            <FinderPhoneField id="finderPhoneFallback" value={finderPhone} onChange={setFinderPhone} label={t.finderPhoneLabel} help={t.finderPhoneHelp} />
             {error && <p role="alert" className="text-center text-sm font-medium text-red-600">{error}</p>}
             <div className="flex flex-col gap-2">
               <button

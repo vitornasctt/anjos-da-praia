@@ -26,7 +26,7 @@ const mkIncident = (id, status, number, child, beachName) => ({ ...incident, id,
 const incidentList = () => [
   incident,
   mkIncident('i2', 'EQUIPE_A_CAMINHO', '1705', 'Maria Eduarda', 'Praia do Morro'),
-  mkIncident('i3', 'RESPONSAVEIS_LOCALIZADOS', '2340', 'João Pedro Albuquerque', 'Praia de Setiba - Posto de Salva-vidas Norte'),
+  { ...mkIncident('i3', 'EQUIPE_A_CAMINHO', '2340', 'João Pedro Albuquerque', 'Praia de Setiba - Posto de Salva-vidas Norte'), farFromTents: true, nearestTent: { id: 't', name: 'Tenda 6', distanceMeters: 3420 }, finderPhone: '(27) 99888-7766' },
 ];
 app.get('/api/incidents', (_req, res) => res.json(page(incidentList())));
 app.get('/api/incidents/:id', (req, res) => res.json(incidentList().find((i) => i.id === req.params.id) ?? incident));

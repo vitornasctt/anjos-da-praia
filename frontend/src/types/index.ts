@@ -82,6 +82,10 @@ export interface Incident {
   assignedTeam?: Team | null;
   statusHistory?: IncidentStatusHistoryEntry[];
   nearestTent?: { id: string; name: string; distanceMeters: number } | null;
+  // true quando o alerta tem GPS mas a tenda ativa mais proxima esta a mais de 2 km.
+  farFromTents?: boolean;
+  // Telefone de quem encontrou a crianca (opcional). So vem no detalhe da ocorrencia.
+  finderPhone?: string | null;
   // So presente no detalhe (GET /incidents/:id) quando o alerta nao tem GPS
   // mas tem praia informada: tenda de apoio daquela praia, como ponto
   // aproximado pra abrir no mapa (nao e a localizacao exata da crianca).
