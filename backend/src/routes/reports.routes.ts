@@ -62,7 +62,9 @@ router.get("/overview", asyncHandler(async (_req, res) => {
         ? beachNameById.get(nearest.tent.beachId) ?? "Praia desconhecida"
         : "Fora da área das tendas";
     } else {
-      label = "Sem praia informada";
+      // Sem praia escolhida e sem GPS: nao ha como saber a praia, entao o alerta
+      // fica fora deste grafico (continua contando no total de ocorrencias).
+      continue;
     }
     incidentsByBeachMap.set(label, (incidentsByBeachMap.get(label) ?? 0) + 1);
   }

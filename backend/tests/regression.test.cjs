@@ -232,7 +232,7 @@ test('relatorio por praia deduz a praia dos alertas com GPS pela tenda mais prox
     gps(-20.7010, -40.4490),                       // perto da tenda 2
     gps(-20.8005, -40.3005),                       // perto da tenda 3 (desativada, ainda vale para o historico)
     gps(-21.5000, -41.0000),                       // longe de qualquer tenda
-    { ...gps(null, null) },                        // sem GPS e sem praia
+    { ...gps(null, null) },                        // sem GPS e sem praia: fora do relatorio por praia
   ]);
   const result = await request('/reports/overview');
   assert.equal(result.status, 200);
@@ -242,7 +242,6 @@ test('relatorio por praia deduz a praia dos alertas com GPS pela tenda mais prox
     'Praia A': 1,
     'Praia C (tenda desativada)': 1,
     'Fora da área das tendas': 1,
-    'Sem praia informada': 1,
   });
   const byTent = Object.fromEntries(result.body.incidentsByTent.map((r) => [r.tent, r.count]));
   assert.equal(byTent['Tenda 3'], undefined, 'o relatorio por tenda ignora tendas desativadas');
