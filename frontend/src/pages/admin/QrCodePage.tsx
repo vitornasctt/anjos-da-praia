@@ -27,9 +27,8 @@ export function QrCodePage() {
 
       <div className="no-print rounded-xl border border-ocean-100 bg-white p-4 shadow-sm sm:p-6">
         <p className="text-ocean-800">
-          Existe <strong>um único QR Code</strong>, igual para todas as pulseiras. Imprima uma vez
-          e use em cartazes, tendas e nas pulseiras: quem achar a criança escaneia e digita o
-          número que está na pulseira.
+          <strong>Um único QR Code</strong> para todas as pulseiras. Escolha o modelo, imprima e
+          cole nas tendas e nas pulseiras.
         </p>
         <p className="mt-3 text-sm text-ocean-600">
           O QR Code leva sempre ao endereço oficial do site:{" "}
