@@ -1,5 +1,5 @@
-// Fonte unica de verdade para os "enums" da aplicacao. SQLite nao suporta
-// enum nativo no Prisma, entao os valores sao strings no banco e
+// Fonte unica de verdade para os "enums" da aplicacao. Os valores ficam
+// guardados como texto no PostgreSQL (sem enum nativo do banco) e sao
 // validados aqui + no Zod nas rotas.
 
 export const ROLES = ["ADMIN", "ATENDENTE", "EQUIPE_CAMPO"] as const;

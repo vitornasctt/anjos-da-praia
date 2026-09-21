@@ -12,9 +12,9 @@ interface PaginationProps {
   busy?: boolean;
 }
 
-// Paginacao por cursor: "Anterior"/"Proxima" (nao ha como pular direto
-// para uma pagina N em keyset pagination sem manter um indice separado,
-// e nao vale a complexidade extra para uma tabela administrativa).
+// Paginação por cursor: "Anterior"/"Próxima" (não há como pular direto
+// para uma página N em keyset pagination sem manter um índice separado,
+// e não vale a complexidade extra para uma tabela administrativa).
 export function Pagination({
   onPrevious,
   onNext,
