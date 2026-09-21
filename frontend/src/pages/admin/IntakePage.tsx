@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, useId, useState } from "react";
-import { UserPlus, Search, X, Plus, Trash2 } from "lucide-react";
+import { UserPlus, Search, X, Plus, Trash2, ChevronDown } from "lucide-react";
 import { apiRequest, ApiError } from "../../services/api";
 import { useAuth } from "../../context/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
@@ -87,6 +87,17 @@ export function IntakePage() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<Family | null>(null);
+  // Familias com os detalhes abertos; a lista mostra so o nome do responsavel.
+  const [expandedFamilies, setExpandedFamilies] = useState<Set<string>>(() => new Set());
+
+  function toggleFamily(id: string) {
+    setExpandedFamilies((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const [searchNumber, setSearchNumber] = useState("");
   const [searchResult, setSearchResult] = useState<Wristband | null | "not_found">(null);
@@ -423,28 +434,78 @@ export function IntakePage() {
             {familySearch ? `Nenhuma família encontrada para "${familySearch}".` : "Nenhuma família cadastrada ainda."}
           </p>
         ) : (
-          <ul className="divide-y divide-ocean-50 text-sm">
-            {families.map((f) => (
-              <li key={f.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                <span className="font-medium">{f.responsibleName}</span>
-                <span className="text-ocean-500">{f.responsiblePhone}</span>
-                {f.responsibleAddress && <span className="basis-full text-ocean-500">{f.responsibleAddress}</span>}
-                <span>
-                  {f.children?.map((c) => `${c.firstName} (#${c.wristbands?.[0]?.printedNumber ?? "—"})`).join(", ")}
-                </span>
-                {user?.role === "ADMIN" && (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmTarget(f)}
-                    disabled={deletingId === f.id}
-                    aria-label={`Apagar dados pessoais de ${f.responsibleName}`}
-                    className="text-sm font-medium text-red-600 underline disabled:opacity-60"
-                  >
-                    {deletingId === f.id ? "Apagando..." : "Apagar dados pessoais"}
-                  </button>
-                )}
-              </li>
-            ))}
+          <ul className="divide-y divide-ocean-100">
+            {families.map((f) => {
+              const open = expandedFamilies.has(f.id);
+              const detailsId = `family-details-${f.id}`;
+              return (
+                <li key={f.id} className="py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="min-w-0 break-words text-base font-semibold text-ocean-900">{f.responsibleName}</span>
+                    <button
+                      type="button"
+                      onClick={() => toggleFamily(f.id)}
+                      aria-expanded={open}
+                      aria-controls={detailsId}
+                      aria-label={`${open ? "Ocultar" : "Ver"} dados de ${f.responsibleName}`}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ocean-200 px-3 py-2 text-sm font-semibold text-ocean-700 hover:bg-ocean-50"
+                    >
+                      {open ? "Ocultar dados" : "Ver dados"}
+                      <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
+                    </button>
+                  </div>
+
+                  {open && (
+                    <div id={detailsId} className="mt-3 space-y-4 rounded-lg bg-ocean-50 p-4 text-sm">
+                      <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-[max-content_1fr]">
+                        <dt className="font-semibold text-ocean-700">Telefone</dt>
+                        <dd className="break-words text-ocean-900">{f.responsiblePhone}</dd>
+
+                        {f.responsibleAddress && (
+                          <>
+                            <dt className="font-semibold text-ocean-700">Endereço</dt>
+                            <dd className="break-words text-ocean-900">{f.responsibleAddress}</dd>
+                          </>
+                        )}
+
+                        <dt className="font-semibold text-ocean-700">
+                          {(f.children?.length ?? 0) === 1 ? "Criança" : "Crianças"}
+                        </dt>
+                        <dd className="text-ocean-900">
+                          {f.children && f.children.length > 0 ? (
+                            <ul className="space-y-1.5">
+                              {f.children.map((c) => (
+                                <li key={c.id}>
+                                  <span className="font-medium">{c.firstName}</span>
+                                  <span className="text-ocean-600"> · pulseira #{c.wristbands?.[0]?.printedNumber ?? "—"}</span>
+                                  {c.optionalIdentificationNote && (
+                                    <span className="block text-ocean-600">{c.optionalIdentificationNote}</span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            "—"
+                          )}
+                        </dd>
+                      </dl>
+
+                      {user?.role === "ADMIN" && (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmTarget(f)}
+                          disabled={deletingId === f.id}
+                          aria-label={`Apagar dados pessoais de ${f.responsibleName}`}
+                          className="text-sm font-medium text-red-600 underline disabled:opacity-60"
+                        >
+                          {deletingId === f.id ? "Apagando..." : "Apagar dados pessoais"}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
 
