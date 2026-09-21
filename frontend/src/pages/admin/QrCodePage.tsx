@@ -5,7 +5,12 @@ import { Printer, QrCode } from "lucide-react";
 // Um unico QR Code para tudo: o mesmo vai nos cartazes, nas tendas e nas
 // pulseiras. Ele so leva a pagina publica; quem achou a crianca digita o
 // numero impresso na pulseira. Por isso nunca precisa ser gerado de novo.
-const PUBLIC_URL = `${window.location.origin}/encontrei`;
+// O endereco e FIXO (o oficial do site), nao o de quem esta com a tela
+// aberta: abrir o painel por um endereco alternativo da Vercel geraria um QR
+// impresso apontando para o lugar errado. Ao registrar um dominio proprio,
+// troque so esta constante.
+const OFFICIAL_SITE_URL = "https://anjos-da-praia.vercel.app";
+const PUBLIC_URL = `${OFFICIAL_SITE_URL}/encontrei`;
 const LABELS_PER_SHEET = 24; // folha A4: 3 colunas x 8 linhas
 
 type Sheet = "cartaz" | "etiquetas";
@@ -27,7 +32,7 @@ export function QrCodePage() {
           número que está na pulseira.
         </p>
         <p className="mt-3 text-sm text-ocean-600">
-          Antes de imprimir, confira se este é o endereço oficial do site:{" "}
+          O QR Code leva sempre ao endereço oficial do site:{" "}
           <strong className="break-all text-ocean-900">{PUBLIC_URL}</strong>
         </p>
 
@@ -40,7 +45,7 @@ export function QrCodePage() {
               sheet === "cartaz" ? "bg-ocean-600 text-white" : "bg-ocean-50 text-ocean-700 hover:bg-ocean-100"
             }`}
           >
-            Cartaz (uma página)
+            Cartaz
           </button>
           <button
             type="button"
@@ -50,7 +55,7 @@ export function QrCodePage() {
               sheet === "etiquetas" ? "bg-ocean-600 text-white" : "bg-ocean-50 text-ocean-700 hover:bg-ocean-100"
             }`}
           >
-            Etiquetas para pulseira ({LABELS_PER_SHEET} por folha)
+            Etiquetas para pulseira
           </button>
         </div>
 
