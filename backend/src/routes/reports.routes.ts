@@ -12,6 +12,11 @@ import { audit } from "../utils/audit";
 const router = Router();
 router.use(authenticate, authorize("ADMIN"));
 
+// Alerta com GPS nao guarda a praia (so quem usa o fluxo sem GPS escolhe uma).
+// No relatorio, a praia e deduzida pela tenda mais proxima, desde que ela esteja
+// a ate esta distancia; alem disso o alerta nao e atribuido a nenhuma praia.
+const MAX_TENT_DISTANCE_FOR_BEACH_METERS = 2000;
+
 router.get("/overview", asyncHandler(async (_req, res) => {
   const [families, children, reunited, totalIncidents, beaches, tents, incidents] = await Promise.all([
     prisma.family.count(),
@@ -19,7 +24,7 @@ router.get("/overview", asyncHandler(async (_req, res) => {
     prisma.incident.count({ where: { status: "REENCONTRO_REALIZADO" } }),
     prisma.incident.count(),
     prisma.beach.findMany(),
-    prisma.tent.findMany({ where: { active: true } }),
+    prisma.tent.findMany(),
     // Esta agregacao (por praia/tenda/horario) genuinamente precisa
     // percorrer todas as ocorrencias - nao e uma lista paginavel na UI.
     // O teto abaixo e so uma rede de seguranca contra crescimento sem
@@ -29,6 +34,10 @@ router.get("/overview", asyncHandler(async (_req, res) => {
       take: 50_000,
     }),
   ]);
+
+  // Tendas desativadas continuam valendo para deduzir a praia do historico;
+  // o relatorio por tenda considera so as ativas.
+  const activeTents = tents.filter((t) => t.active);
 
   // resolvedAt >= createdAt sempre em uso normal (setado no momento do
   // PATCH de status); o filtro so protege contra dado inconsistente.
@@ -44,7 +53,17 @@ router.get("/overview", asyncHandler(async (_req, res) => {
   const beachNameById = new Map(beaches.map((b) => [b.id, b.name]));
   const incidentsByBeachMap = new Map<string, number>();
   for (const incident of incidents) {
-    const label = incident.beachId ? beachNameById.get(incident.beachId) ?? "Praia desconhecida" : "Sem praia informada";
+    let label: string;
+    if (incident.beachId) {
+      label = beachNameById.get(incident.beachId) ?? "Praia desconhecida";
+    } else if (incident.latitude != null && incident.longitude != null) {
+      const nearest = findNearestTent({ latitude: incident.latitude, longitude: incident.longitude }, tents);
+      label = nearest && nearest.distanceMeters <= MAX_TENT_DISTANCE_FOR_BEACH_METERS
+        ? beachNameById.get(nearest.tent.beachId) ?? "Praia desconhecida"
+        : "Fora da área das tendas";
+    } else {
+      label = "Sem praia informada";
+    }
     incidentsByBeachMap.set(label, (incidentsByBeachMap.get(label) ?? 0) + 1);
   }
   const incidentsByBeach = [...incidentsByBeachMap.entries()].map(([beach, count]) => ({ beach, count }));
@@ -53,7 +72,7 @@ router.get("/overview", asyncHandler(async (_req, res) => {
   const incidentsByTentMap = new Map<string, number>();
   for (const incident of incidents) {
     if (incident.latitude == null || incident.longitude == null) continue;
-    const nearest = findNearestTent({ latitude: incident.latitude, longitude: incident.longitude }, tents);
+    const nearest = findNearestTent({ latitude: incident.latitude, longitude: incident.longitude }, activeTents);
     if (!nearest) continue;
     incidentsByTentMap.set(nearest.tent.name, (incidentsByTentMap.get(nearest.tent.name) ?? 0) + 1);
   }

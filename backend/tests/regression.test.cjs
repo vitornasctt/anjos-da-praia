@@ -215,6 +215,38 @@ test('logout falha e NAO limpa os cookies se a revogacao nao for gravada', async
   assert.equal(response.status, 500);
   assert.equal(response.headers.getSetCookie().some((c) => c.startsWith('token=')), false);
 });
+test('relatorio por praia deduz a praia dos alertas com GPS pela tenda mais proxima (ate 2 km)', async () => {
+  const gps = (lat, lon) => ({ id: 'x', status: 'CRIANCA_LOCALIZADA', createdAt: new Date(), resolvedAt: null, beachId: null, latitude: lat, longitude: lon });
+  mock.method(prisma.family, 'count', async () => 0);
+  mock.method(prisma.child, 'count', async () => 0);
+  mock.method(prisma.incident, 'count', async () => 5);
+  mock.method(prisma.beach, 'findMany', async () => [{ id: 'b1', name: 'Praia A' }, { id: 'b2', name: 'Praia B' }, { id: 'b3', name: 'Praia C (tenda desativada)' }]);
+  mock.method(prisma.tent, 'findMany', async () => [
+    { id: 't1', name: 'Tenda 1', beachId: 'b1', latitude: -20.6500, longitude: -40.5000, active: true },
+    { id: 't2', name: 'Tenda 2', beachId: 'b2', latitude: -20.7000, longitude: -40.4500, active: true },
+    { id: 't3', name: 'Tenda 3', beachId: 'b3', latitude: -20.8000, longitude: -40.3000, active: false },
+  ]);
+  mock.method(prisma.incident, 'findMany', async () => [
+    { ...gps(null, null), beachId: 'b2' },        // praia escolhida pela pessoa (sem GPS)
+    gps(-20.6520, -40.5010),                       // ~250 m da tenda 1
+    gps(-20.7010, -40.4490),                       // perto da tenda 2
+    gps(-20.8005, -40.3005),                       // perto da tenda 3 (desativada, ainda vale para o historico)
+    gps(-21.5000, -41.0000),                       // longe de qualquer tenda
+    { ...gps(null, null) },                        // sem GPS e sem praia
+  ]);
+  const result = await request('/reports/overview');
+  assert.equal(result.status, 200);
+  const byBeach = Object.fromEntries(result.body.incidentsByBeach.map((r) => [r.beach, r.count]));
+  assert.deepEqual(byBeach, {
+    'Praia B': 2,
+    'Praia A': 1,
+    'Praia C (tenda desativada)': 1,
+    'Fora da área das tendas': 1,
+    'Sem praia informada': 1,
+  });
+  const byTent = Object.fromEntries(result.body.incidentsByTent.map((r) => [r.tent, r.count]));
+  assert.equal(byTent['Tenda 3'], undefined, 'o relatorio por tenda ignora tendas desativadas');
+});
 test('PATCH rejeita string false e ausencia do campo active', async () => {
   for (const resource of ['users', 'teams', 'tents']) {
     for (const body of [{ active: 'false' }, {}]) {
