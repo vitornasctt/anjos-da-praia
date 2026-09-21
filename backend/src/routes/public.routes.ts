@@ -8,6 +8,7 @@ import { publishIncident } from "../lib/io";
 import { serializable } from "../lib/transaction";
 import { HttpError } from "../utils/httpError";
 import { familyStatusMessage, sendFamilyMessage } from "../lib/notify";
+import { isValidPhone } from "../utils/validation";
 
 const router = Router();
 
@@ -68,8 +69,8 @@ export const createIncidentSchema = z
 
 router.post("/incidents", publicLimiter, validateBody(createIncidentSchema), asyncHandler(async (req, res) => {
   const { printedNumber, latitude, longitude, locationAccuracy, beachId, referencePoint } = req.body;
-  // So guarda se parecer um telefone (ao menos 8 digitos); senao, segue sem ele.
-  const finderPhone: string | null = req.body.finderPhone && req.body.finderPhone.replace(/\D/g, "").length >= 8 ? req.body.finderPhone : null;
+  // So guarda se for um telefone valido (so numeros, com DDD); senao, segue sem ele.
+  const finderPhone: string | null = req.body.finderPhone && isValidPhone(req.body.finderPhone) ? req.body.finderPhone : null;
   const result = await serializable(async (tx) => {
     const wristband = await tx.wristband.findUnique({
       where: { printedNumber },

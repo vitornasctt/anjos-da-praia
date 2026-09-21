@@ -10,6 +10,7 @@ import { serializable } from "../lib/transaction";
 import { HttpError } from "../utils/httpError";
 import { ANONYMIZED_LABEL, FINAL } from "../jobs/dataRetention";
 import { paginationQuerySchema, takeForPage, splitPage, MAX_PAGE_SIZE } from "../utils/pagination";
+import { personName, phoneSchema } from "../utils/validation";
 
 const router = Router();
 router.use(authenticate, authorize("ADMIN", "ATENDENTE"));
@@ -21,7 +22,7 @@ router.use(authenticate, authorize("ADMIN", "ATENDENTE"));
 export const MAX_CHILDREN_PER_INTAKE = 10;
 
 const intakeChildSchema = z.object({
-  firstName: z.string().trim().min(1).max(80),
+  firstName: personName("Nome da criança", 80),
   // Numero impresso na pulseira: so digitos (mantem zeros a esquerda, ex.: "0004").
   printedNumber: z.string().trim().min(1).max(20).regex(/^\d+$/, "O numero da pulseira deve ter apenas numeros."),
   optionalIdentificationNote: z.string().trim().max(280).optional(),
@@ -34,8 +35,8 @@ const intakeChildSchema = z.object({
 });
 
 const intakeSchema = z.object({
-  responsibleName: z.string().trim().min(2).max(120),
-  responsiblePhone: z.string().trim().min(8).max(20),
+  responsibleName: personName("Nome do responsável", 120),
+  responsiblePhone: phoneSchema,
   responsibleAddress: z.string().trim().max(200).optional(),
   children: z.array(intakeChildSchema).min(1).max(MAX_CHILDREN_PER_INTAKE),
 }).superRefine((value, ctx) => {

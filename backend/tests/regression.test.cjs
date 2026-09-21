@@ -489,7 +489,47 @@ test('cadastro recusa pulseira repetida na mesma familia e lista de criancas vaz
   const repeated = await request('/families/intake', { ...base, children: [{ firstName: 'Ana', printedNumber: '7' }, { firstName: 'Bia', printedNumber: '7' }] });
   assert.equal(repeated.status, 400);
   assert.equal((await request('/families/intake', { ...base, children: [] })).status, 400);
-  assert.equal((await request('/families/intake', { ...base, children: Array.from({ length: 11 }, (_, i) => ({ firstName: 'C' + i, printedNumber: String(i) })) })).status, 400);
+  assert.equal((await request('/families/intake', { ...base, children: Array.from({ length: 11 }, (_, i) => ({ firstName: String.fromCharCode(65 + i).repeat(2), printedNumber: String(i) })) })).status, 400);
+});
+test('cadastro so aceita nomes com letras e telefone so com numeros (com DDD)', async () => {
+  const send = (over) => request('/families/intake', { responsibleName: 'Carlos Almeida', responsiblePhone: '27999990000', children: [{ firstName: 'Lucas', printedNumber: '4821' }], ...over });
+  const badNames = ['0294932w', '12345', 'Ana2', 'Ana@', 'Ana_Maria', 'Ana!', 'A', '  ', '-', '.', 'Ana<b>'];
+  for (const name of badNames) {
+    assert.equal((await send({ responsibleName: name })).status, 400, `responsavel "${name}" deveria ser recusado`);
+    assert.equal((await send({ children: [{ firstName: name, printedNumber: '4821' }] })).status, 400, `crianca "${name}" deveria ser recusada`);
+  }
+  assert.equal((await send({ children: [{ firstName: '209120941', printedNumber: '4821' }] })).status, 400);
+  const badPhones = ['lalsmdnsfe3', '27abc99999', '12345', '999999999', 'sem numero', '(27) 9999-abcd', '1'.repeat(16), '27 99999-0000 ramal 5', '<script>1234567890</script>'];
+  for (const phone of badPhones) assert.equal((await send({ responsiblePhone: phone })).status, 400, `telefone "${phone}" deveria ser recusado`);
+  const detail = await send({ responsiblePhone: 'lalsmdnsfe3' });
+  assert.match(detail.body.details.responsiblePhone[0], /Telefone inválido/);
+});
+test('cadastro aceita nomes com acento, hifen, apostrofo e ponto, e telefones com formatacao', async () => {
+  const created = [];
+  const okNames = ['João da Silva', "D'Ávila", 'Maria-Clara', 'Ana Júlia', 'José Jr.', 'Zoë  Ñandú'];
+  const okPhones = ['(27) 99999-0000', '+55 27 99999-0000', '27999990000', '27 3333-4444', '+351 912 345 678'];
+  for (let i = 0; i < okNames.length; i++) {
+    transaction({
+      wristband: { findUnique: async () => null, create: async ({ data }) => ({ id: 'w', ...data }) },
+      family: { create: async ({ data }) => { created.push(data); return { id: 'f', ...data }; } },
+      child: { create: async ({ data }) => ({ id: 'c', ...data }) },
+      auditLog: { create: async () => ({}) },
+    });
+    const result = await request('/families/intake', { responsibleName: okNames[i], responsiblePhone: okPhones[i % okPhones.length], children: [{ firstName: okNames[(i + 1) % okNames.length], printedNumber: String(100 + i) }] });
+    assert.equal(result.status, 201, `"${okNames[i]}" / "${okPhones[i % okPhones.length]}" deveriam ser aceitos: ${JSON.stringify(result.body)}`);
+  }
+  assert.equal(created[5].responsibleName, 'Zoë Ñandú', 'espacos repetidos sao normalizados');
+});
+test('telefone de quem encontrou com letras e ignorado, sem bloquear o alerta', async () => {
+  const created = [];
+  for (const finderPhone of ['abc12345678901', '(27) 99777-6655', '1234567']) {
+    transaction({
+      wristband: { findUnique: async () => ({ id: 'band', status: 'ATIVA', childId: 'child' }) },
+      incident: { findFirst: async () => null, create: async ({ data }) => { created.push(data.finderPhone); return { id: 'new', status: data.status }; } },
+    });
+    assert.equal((await request('/public/incidents', { printedNumber: '4821', referencePoint: 'Posto', finderPhone }, { public: true })).status, 201);
+  }
+  assert.deepEqual(created, [null, '(27) 99777-6655', null]);
 });
 test('cadastro so aceita numero de pulseira com digitos (aceita zeros a esquerda)', async () => {
   const body = (printedNumber) => ({ responsibleName: 'Pessoa', responsiblePhone: '27999990000', children: [{ firstName: 'Ana', printedNumber }] });

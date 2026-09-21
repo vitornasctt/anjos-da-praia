@@ -9,6 +9,7 @@ import { SkeletonRows } from "../../components/Skeleton";
 import { useCursorPage } from "../../hooks/useCursorPage";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { Family, Wristband } from "../../types";
+import { cleanName, cleanPhone, isValidName, isValidPhone } from "../../utils/validation";
 
 const MAX_CHILDREN = 10; // mesmo limite da API (MAX_CHILDREN_PER_INTAKE)
 
@@ -128,6 +129,20 @@ export function IntakePage() {
     setError(null);
     setSuccess(null);
 
+    if (!isValidName(form.responsibleName)) {
+      setError("Nome do responsável: use apenas letras (sem números ou símbolos) e informe o nome completo.");
+      return;
+    }
+    if (!isValidPhone(form.responsiblePhone)) {
+      setError("Telefone do responsável: informe só números, com DDD. Exemplo: (27) 99999-0000.");
+      return;
+    }
+    const badKid = kids.findIndex((k) => !isValidName(k.firstName));
+    if (badKid !== -1) {
+      setError(`Nome da criança${kids.length > 1 ? ` ${badKid + 1}` : ""}: use apenas letras (sem números ou símbolos).`);
+      return;
+    }
+
     const numbers = kids.map((k) => k.printedNumber.trim());
     const repeated = numbers.find((n, i) => numbers.indexOf(n) !== i);
     if (repeated) {
@@ -163,7 +178,8 @@ export function IntakePage() {
       setKids([newChildDraft()]);
       reloadFamilies();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Não foi possível concluir o cadastro.");
+      // Se o servidor recusou algum campo, mostra o motivo (em vez de so "Dados invalidos").
+      setError(err instanceof ApiError ? err.details[0] ?? err.message : "Não foi possível concluir o cadastro.");
     } finally {
       setSaving(false);
     }
@@ -237,8 +253,24 @@ export function IntakePage() {
       </h1>
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-4 rounded-xl border border-ocean-100 bg-white p-4 shadow-sm sm:grid-cols-2 sm:p-6">
-        <Field label="Nome do responsável" value={form.responsibleName} onChange={(v) => setForm({ ...form, responsibleName: v })} required />
-        <Field label="Telefone do responsável" value={form.responsiblePhone} onChange={(v) => setForm({ ...form, responsiblePhone: v })} required placeholder="(27) 99999-0000" />
+        <Field
+          label="Nome do responsável"
+          value={form.responsibleName}
+          onChange={(v) => setForm({ ...form, responsibleName: cleanName(v) })}
+          required
+          maxLength={120}
+          autoComplete="off"
+        />
+        <Field
+          label="Telefone do responsável"
+          value={form.responsiblePhone}
+          onChange={(v) => setForm({ ...form, responsiblePhone: cleanPhone(v) })}
+          required
+          placeholder="(27) 99999-0000"
+          type="tel"
+          inputMode="tel"
+          maxLength={20}
+        />
         <div className="sm:col-span-2">
           <Field
             label="Endereço do responsável (opcional)"
@@ -260,7 +292,7 @@ export function IntakePage() {
               <Field
                 label="Nome da criança"
                 value={kid.firstName}
-                onChange={(v) => updateKid(kid.key, { firstName: v })}
+                onChange={(v) => updateKid(kid.key, { firstName: cleanName(v) })}
                 required
                 maxLength={80}
               />
@@ -549,6 +581,8 @@ function Field({
   maxLength,
   numeric,
   autoComplete,
+  type,
+  inputMode,
 }: {
   label: string;
   value: string;
@@ -558,6 +592,8 @@ function Field({
   maxLength?: number;
   numeric?: boolean;
   autoComplete?: string;
+  type?: "text" | "tel";
+  inputMode?: "numeric" | "tel" | "text";
 }) {
   const id = useId();
   return (
@@ -571,7 +607,8 @@ function Field({
         placeholder={placeholder}
         maxLength={maxLength}
         autoComplete={autoComplete}
-        inputMode={numeric ? "numeric" : undefined}
+        type={type}
+        inputMode={inputMode ?? (numeric ? "numeric" : undefined)}
         pattern={numeric ? "[0-9]*" : undefined}
         className="w-full rounded-lg border border-ocean-200 px-3 py-2 focus:border-ocean-500"
       />

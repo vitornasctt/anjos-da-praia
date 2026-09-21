@@ -3,10 +3,20 @@ const REQUEST_TIMEOUT_MS = 15000;
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  // Mensagens de validacao por campo, quando o servidor devolve 400 "Dados invalidos".
+  details: string[];
+  constructor(message: string, status: number, details: string[] = []) {
     super(message);
     this.status = status;
+    this.details = details;
   }
+}
+
+function validationMessages(details: unknown): string[] {
+  if (!details || typeof details !== "object") return [];
+  return Object.values(details as Record<string, unknown>)
+    .flatMap((value) => (Array.isArray(value) ? value : []))
+    .filter((message): message is string => typeof message === "string");
 }
 
 function getCookie(name: string): string | null {
@@ -49,7 +59,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
     if (!response.ok) {
       if (response.status === 401 && !path.startsWith("/public/") && path !== "/auth/login") window.dispatchEvent(new Event("session-expired"));
-      throw new ApiError(data?.error ?? "Ocorreu um erro. Tente novamente.", response.status);
+      throw new ApiError(data?.error ?? "Ocorreu um erro. Tente novamente.", response.status, validationMessages(data?.details));
     }
 
     return data as T;

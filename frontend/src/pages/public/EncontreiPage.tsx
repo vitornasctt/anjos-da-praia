@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { apiRequest, ApiError } from "../../services/api";
 import { STATUS_META } from "../../components/StatusBadge";
 import { Beach, IncidentStatus } from "../../types";
+import { cleanPhone } from "../../utils/validation";
 
 type Step = "numero" | "localizacao" | "fallback" | "confirmado";
 type Lang = "pt" | "en" | "es";
@@ -253,7 +254,7 @@ function FinderPhoneField({
         autoComplete="tel"
         maxLength={20}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => onChange(cleanPhone(e.target.value))}
         placeholder="(27) 99999-0000"
         className="w-full rounded-xl border-2 border-ocean-200 px-4 py-3 text-lg text-ocean-900 focus:border-ocean-500"
       />
