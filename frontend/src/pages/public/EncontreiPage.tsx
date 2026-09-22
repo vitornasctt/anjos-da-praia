@@ -28,6 +28,9 @@ interface PageCopy {
   continueBtn: string;
   locationPrompt: string;
   locating: string;
+  locationDeniedNote: string;
+  locationUnavailableNote: string;
+  locationTimeoutNote: string;
   sending: string;
   shareLocationBtn: string;
   cannotShare: string;
@@ -63,8 +66,11 @@ const COPY: Record<Lang, PageCopy> = {
     networkError: "Não foi possível conectar. Verifique sua internet e tente novamente.",
     checking: "Verificando...",
     continueBtn: "CONTINUAR",
-    locationPrompt: "Compartilhe sua localização para nossa equipe chegar até você.",
+    locationPrompt: "Estamos obtendo automaticamente sua localização, do lugar exato onde você está, para nossa equipe chegar até você.",
     locating: "Obtendo localização...",
+    locationDeniedNote: "(permissão de localização negada neste aparelho)",
+    locationUnavailableNote: "(sinal de localização indisponível aqui)",
+    locationTimeoutNote: "(tempo esgotado ao tentar obter a localização)",
     sending: "Enviando...",
     shareLocationBtn: "COMPARTILHAR LOCALIZAÇÃO E ENVIAR ALERTA",
     cannotShare: "Não consigo compartilhar a localização",
@@ -120,8 +126,11 @@ const COPY: Record<Lang, PageCopy> = {
     networkError: "Could not connect. Check your internet connection and try again.",
     checking: "Checking...",
     continueBtn: "CONTINUE",
-    locationPrompt: "Share your location so our team can reach you.",
+    locationPrompt: "We're automatically getting your exact location so our team can reach you.",
     locating: "Getting location...",
+    locationDeniedNote: "(location permission denied on this device)",
+    locationUnavailableNote: "(location signal unavailable here)",
+    locationTimeoutNote: "(timed out while getting your location)",
     sending: "Sending...",
     shareLocationBtn: "SHARE LOCATION AND SEND ALERT",
     cannotShare: "I can't share my location",
@@ -177,8 +186,11 @@ const COPY: Record<Lang, PageCopy> = {
     networkError: "No se pudo conectar. Verifica tu conexión a internet e intenta de nuevo.",
     checking: "Verificando...",
     continueBtn: "CONTINUAR",
-    locationPrompt: "Comparte tu ubicación para que nuestro equipo llegue hasta ti.",
+    locationPrompt: "Estamos obteniendo automáticamente tu ubicación exacta para que nuestro equipo llegue hasta ti.",
     locating: "Obteniendo ubicación...",
+    locationDeniedNote: "(permiso de ubicación denegado en este dispositivo)",
+    locationUnavailableNote: "(señal de ubicación no disponible aquí)",
+    locationTimeoutNote: "(tiempo agotado al obtener tu ubicación)",
     sending: "Enviando...",
     shareLocationBtn: "COMPARTIR UBICACIÓN Y ENVIAR ALERTA",
     cannotShare: "No puedo compartir mi ubicación",
@@ -273,7 +285,13 @@ export function EncontreiPage() {
   const t = COPY[lang];
   const requestInFlight = useRef(false);
   const locationInFlight = useRef(false);
+  // Pede a localizacao uma unica vez, automaticamente, assim que a pessoa chega
+  // nesta etapa - sem precisar tocar em nada (ver useEffect abaixo).
+  const autoRequestedRef = useRef(false);
   const [locating, setLocating] = useState(false);
+  // Motivo da ultima falha ao obter a localizacao (so setado quando o
+  // navegador de fato tentou e nao conseguiu), exibido na tela de alternativa.
+  const [locationErrorCode, setLocationErrorCode] = useState<number | null>(null);
   const [statusError, setStatusError] = useState(false);
   const [step, setStep] = useState<Step>("numero");
   const [printedNumber, setPrintedNumber] = useState("");
@@ -354,10 +372,17 @@ export function EncontreiPage() {
     }
   }
 
-  function requestLocation() {
+  // Captura a posicao exata de quem esta com a crianca no momento do alerta
+  // (nao uma aproximacao). Primeira tentativa pede alta precisao (GPS); se
+  // falhar por indisponibilidade ou tempo esgotado - comum em notebook/desktop
+  // sem chip de GPS, que depende de Wi-Fi/IP - tenta de novo aceitando menor
+  // precisao antes de cair na tela de alternativa manual. Permissao negada
+  // nao adianta repetir: o navegador nao pergunta de novo sozinho.
+  function requestLocation(highAccuracy = true) {
     if (locationInFlight.current || requestInFlight.current || incidentId) return;
     setError(null);
     if (!("geolocation" in navigator)) {
+      setLocationErrorCode(null);
       setStep("fallback");
       return;
     }
@@ -373,10 +398,30 @@ export function EncontreiPage() {
           locationAccuracy: position.coords.accuracy,
         });
       },
-      () => { locationInFlight.current = false; setLocating(false); setStep("fallback"); },
-      { enableHighAccuracy: true, timeout: 10000 }
+      (geoError) => {
+        locationInFlight.current = false;
+        const PERMISSION_DENIED = 1;
+        if (highAccuracy && geoError.code !== PERMISSION_DENIED) {
+          requestLocation(false);
+          return;
+        }
+        setLocating(false);
+        setLocationErrorCode(geoError.code);
+        setStep("fallback");
+      },
+      { enableHighAccuracy: highAccuracy, timeout: highAccuracy ? 8000 : 15000 }
     );
   }
+
+  // Pede a localizacao automaticamente assim que a tela de localizacao abre -
+  // a pessoa nao precisa tocar em nada para o alerta sair de onde ela esta.
+  useEffect(() => {
+    if (step === "localizacao" && !autoRequestedRef.current) {
+      autoRequestedRef.current = true;
+      requestLocation();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   // Acompanhamento ao vivo do status apos o alerta - so o status, nunca
   // localizacao ou dado pessoal. Para sozinho quando chega a um estado final.
@@ -492,7 +537,7 @@ export function EncontreiPage() {
             <FinderPhoneField id="finderPhone" value={finderPhone} onChange={setFinderPhone} label={t.finderPhoneLabel} help={t.finderPhoneHelp} />
             {error && <p role="alert" className="text-sm font-medium text-red-600">{error}</p>}
             <button
-              onClick={requestLocation}
+              onClick={() => requestLocation()}
               disabled={sending || locating}
               className="w-full rounded-xl bg-red-600 px-6 py-5 text-lg font-bold text-white shadow-md transition hover:bg-red-700 disabled:opacity-60"
             >
@@ -513,6 +558,15 @@ export function EncontreiPage() {
             <p className="text-center text-sm font-medium text-ocean-800">
               {t.fallbackPrompt}
             </p>
+            {locationErrorCode != null && (
+              <p className="text-center text-xs text-ocean-500">
+                {locationErrorCode === 1
+                  ? t.locationDeniedNote
+                  : locationErrorCode === 3
+                  ? t.locationTimeoutNote
+                  : t.locationUnavailableNote}
+              </p>
+            )}
             <div>
               <label htmlFor="beach" className="mb-1 block text-sm font-semibold text-ocean-900">
                 {t.beachLabel}
@@ -549,7 +603,7 @@ export function EncontreiPage() {
             <div className="flex flex-col gap-2">
               <button
                 type="button"
-                onClick={requestLocation}
+                onClick={() => requestLocation()}
                 disabled={sending || locating}
                 className="w-full rounded-xl border-2 border-ocean-300 px-4 py-3 font-semibold text-ocean-700"
               >
